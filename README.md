@@ -3,27 +3,27 @@ This search engine is supposed to show operations on a specific database of vide
 
 # Movie Insights Agent
 
-## Problem biznesowy
-Analitycy i PM potrzebują szybkich odpowiedzi z danych platformy filmowej bez ręcznego pisania SQL.
+## Business Problem
+Analysts and PMs need quick answers from movie-platform data without manually writing SQL.
 
-## Cel projektu
-Użytkownik zadaje pytanie po polsku, system zwraca:
-- SQL
-- tabelę wyników
-- wykres
-- krótki insight
+## Project Goal
+The user asks a question in natural language, and the system returns:
+- SQL query
+- result table
+- chart
+- short insight
 
-## Zakres MVP
-- NL -> SQL (pytania analityczne)
-- Walidacja bezpieczeństwa (`SELECT only`)
-- Wizualizacja wyników
+## MVP Scope
+- NL -> SQL (analytical questions)
+- safety validation (`SELECT only`)
+- result visualization
 
-## Metryki sukcesu
-- % poprawnych zapytań SQL
+## Success Metrics
+- % of correct SQL queries
 - median latency
-- % poprawnych odpowiedzi merytorycznych
+- % of factually correct answers
 
-## Poza zakresem
-- streaming video
-- płatności
-- rozbudowany system kont
+## Out of Scope
+- video streaming
+- payments
+- advanced account system
