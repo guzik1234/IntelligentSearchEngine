@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IntelligentSearchEngine | Movie Insights Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape--one"></div>
+    <div class="bg-shape bg-shape--two"></div>
+
+    <header class="hero">
+      <p class="hero__eyebrow">AI Analytics for Movie Platforms</p>
+      <h1>IntelligentSearchEngine</h1>
+      <p class="hero__subtitle">
+        Ask a business question in plain language. Get SQL, a result table, a chart, and a concise insight.
+      </p>
+      <div class="hero__tags">
+        <span>NL -> SQL</span>
+        <span>Read-only Safety</span>
+        <span>Fast Insights</span>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="panel panel--query">
+        <h2>Ask a Question</h2>
+        <p class="panel__hint">Try one of the sample questions or type your own.</p>
+
+        <div class="samples" id="sampleQuestions"></div>
+
+        <label for="questionInput" class="sr-only">Business question</label>
+        <textarea
+          id="questionInput"
+          rows="3"
+          placeholder="e.g. Which genre had the highest watch time in Q4?"
+        ></textarea>
+
+        <div class="actions">
+          <button id="runBtn" type="button">Generate Insight</button>
+          <span class="status" id="statusText">Ready</span>
+        </div>
+      </section>
+
+      <section class="panel panel--result">
+        <div class="result-head">
+          <h2>Result</h2>
+          <span class="badge" id="safetyBadge">SAFE: SELECT only</span>
+        </div>
+
+        <article class="result-card">
+          <h3>Generated SQL</h3>
+          <pre id="sqlOutput">-- SQL will appear here</pre>
+        </article>
+
+        <article class="result-card">
+          <h3>Result Table</h3>
+          <div class="table-wrap">
+            <table>
+              <thead id="resultHead"></thead>
+              <tbody id="resultBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="result-card">
+          <h3>Chart</h3>
+          <canvas id="chartCanvas" width="900" height="320" aria-label="Result chart"></canvas>
+        </article>
+
+        <article class="result-card insight">
+          <h3>Business Insight</h3>
+          <p id="insightText">Insight will appear here.</p>
+        </article>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
