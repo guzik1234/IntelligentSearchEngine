@@ -6,27 +6,7 @@ const sampleQuestions = [
   "Which user segment shows the best retention?"
 ];
 
-const mockResponse = {
-  sql: `SELECT genre,
-       SUM(watch_minutes) AS total_watch_minutes,
-       ROUND(AVG(rating), 2) AS avg_rating
-FROM fact_watch_events e
-JOIN dim_movies m ON m.movie_id = e.movie_id
-WHERE e.quarter = 'Q4'
-GROUP BY genre
-ORDER BY total_watch_minutes DESC
-LIMIT 5;`,
-  columns: ["genre", "total_watch_minutes", "avg_rating"],
-  rows: [
-    ["Drama", 152340, 4.32],
-    ["Sci-Fi", 141220, 4.18],
-    ["Comedy", 118905, 3.91],
-    ["Thriller", 103880, 4.07],
-    ["Animation", 98420, 4.24]
-  ],
-  insight:
-    "Drama generated the highest watch time in Q4, leading Sci-Fi by about 7.9%. Both genres also maintain strong average ratings above 4.1, suggesting a high-engagement and high-satisfaction segment."
-};
+const API_BASE_URL = "";
 
 const sampleContainer = document.getElementById("sampleQuestions");
 const questionInput = document.getElementById("questionInput");
@@ -36,8 +16,8 @@ const sqlOutput = document.getElementById("sqlOutput");
 const resultHead = document.getElementById("resultHead");
 const resultBody = document.getElementById("resultBody");
 const insightText = document.getElementById("insightText");
-const canvas = document.getElementById("chartCanvas");
-const ctx = canvas.getContext("2d");
+const chartContainer = document.getElementById("chartCanvas");
+let currentRows = [];
 
 function renderSampleQuestions() {
   sampleQuestions.forEach((question) => {
@@ -64,6 +44,16 @@ function renderTable(columns, rows) {
   });
   resultHead.appendChild(headRow);
 
+  if (!rows || rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.textContent = "No data returned for this question.";
+    td.colSpan = Math.max(columns.length, 1);
+    tr.appendChild(td);
+    resultBody.appendChild(tr);
+    return;
+  }
+
   rows.forEach((row) => {
     const tr = document.createElement("tr");
     row.forEach((value) => {
@@ -76,63 +66,165 @@ function renderTable(columns, rows) {
 }
 
 function drawBarChart(rows) {
-  const labels = rows.map((row) => row[0]);
-  const values = rows.map((row) => row[1]);
-
-  const width = canvas.width;
-  const height = canvas.height;
-  const margin = { top: 26, right: 20, bottom: 56, left: 52 };
-  const chartWidth = width - margin.left - margin.right;
-  const chartHeight = height - margin.top - margin.bottom;
-  const maxValue = Math.max(...values) * 1.1;
-  const barWidth = chartWidth / values.length - 18;
-
-  ctx.clearRect(0, 0, width, height);
-
-  ctx.strokeStyle = "#d7c8b4";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(margin.left, margin.top);
-  ctx.lineTo(margin.left, margin.top + chartHeight);
-  ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-  ctx.stroke();
-
-  ctx.font = "12px IBM Plex Mono";
-  ctx.fillStyle = "#6a5c51";
-
-  for (let i = 0; i <= 4; i += 1) {
-    const yValue = (maxValue / 4) * i;
-    const y = margin.top + chartHeight - (yValue / maxValue) * chartHeight;
-
-    ctx.strokeStyle = "#efe2cf";
-    ctx.beginPath();
-    ctx.moveTo(margin.left, y);
-    ctx.lineTo(margin.left + chartWidth, y);
-    ctx.stroke();
-
-    ctx.fillText(Math.round(yValue).toString(), 8, y + 3);
+  if (typeof Plotly === "undefined") {
+    statusText.textContent = "Plotly is not loaded.";
+    return;
   }
 
-  values.forEach((value, index) => {
-    const x = margin.left + index * (barWidth + 18) + 10;
-    const barHeight = (value / maxValue) * chartHeight;
-    const y = margin.top + chartHeight - barHeight;
+  if (!rows || rows.length === 0) {
+    const emptyHeight = 220;
+    chartContainer.style.height = `${emptyHeight}px`;
+    Plotly.react(
+      chartContainer,
+      [],
+      {
+        autosize: false,
+        height: emptyHeight,
+        margin: { t: 12, r: 12, b: 28, l: 36 },
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        annotations: [
+          {
+            text: "No data to plot",
+            x: 0.5,
+            y: 0.5,
+            showarrow: false,
+            font: { family: "Space Grotesk, sans-serif", size: 14, color: "#5d524a" },
+            xref: "paper",
+            yref: "paper"
+          }
+        ],
+        xaxis: { visible: false },
+        yaxis: { visible: false }
+      },
+      { responsive: true, displayModeBar: false }
+    );
+    return;
+  }
 
-    const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-    gradient.addColorStop(0, "#0b7a75");
-    gradient.addColorStop(1, "#5ac0b0");
+  const labels = rows.map((row) => row[0]);
+  const values = rows.map((row) => row[1]);
+  const shortLabels = labels.map((label) => {
+    const text = String(label);
+    return text.length > 34 ? `${text.slice(0, 31)}...` : text;
+  });
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, y, barWidth, barHeight);
+  // Dynamic height keeps labels readable and avoids overflow in dense results.
+  const chartHeight = Math.min(520, Math.max(240, rows.length * 38));
+  chartContainer.style.height = `${chartHeight}px`;
 
-    ctx.fillStyle = "#2f2722";
-    ctx.textAlign = "center";
-    ctx.fillText(labels[index], x + barWidth / 2, margin.top + chartHeight + 18);
-    ctx.fillText(value.toString(), x + barWidth / 2, y - 6);
+  const trace = {
+    x: values,
+    y: shortLabels,
+    type: "bar",
+    orientation: "h",
+    marker: {
+      color: values,
+      colorscale: [
+        [0, "#86d5c9"],
+        [1, "#0b7a75"]
+      ],
+      line: { color: "#085956", width: 1 }
+    },
+    customdata: labels,
+    hovertemplate: "%{customdata}<br>Value: %{x}<extra></extra>",
+    cliponaxis: true
+  };
+
+  const layout = {
+    autosize: false,
+    height: chartHeight,
+    margin: { t: 14, r: 16, b: 34, l: 160 },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(255,253,248,0.6)",
+    xaxis: {
+      title: { text: "Value" },
+      color: "#5d524a",
+      gridcolor: "rgba(216,202,183,0.35)"
+    },
+    yaxis: {
+      automargin: true,
+      color: "#5d524a",
+      zerolinecolor: "rgba(216,202,183,0.5)",
+      gridcolor: "rgba(216,202,183,0.35)"
+    },
+    bargap: 0.2,
+    font: { family: "IBM Plex Mono, monospace", size: 11, color: "#332a25" }
+  };
+
+  Plotly.react(chartContainer, [trace], layout, {
+    responsive: true,
+    displayModeBar: false
   });
 }
 
-function fakeRunQuery() {
+function buildKeywordFromQuestion(question) {
+  const stopWords = new Set([
+    "which",
+    "what",
+    "how",
+    "did",
+    "does",
+    "have",
+    "has",
+    "had",
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "in",
+    "on",
+    "for",
+    "to",
+    "and",
+    "of",
+    "between",
+    "by",
+    "q3",
+    "q4"
+  ]);
+
+  const words = question
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z0-9-]/g, ""))
+    .filter((word) => word && !stopWords.has(word) && word.length > 2);
+
+  if (words.length === 0) {
+    return "movie";
+  }
+
+  return words.slice(0, 3).join(" ");
+}
+
+function buildFallbackResponse(question) {
+  const keyword = buildKeywordFromQuestion(question);
+
+  return {
+    sql: `SELECT m.title, ROUND(AVG(r.rating), 2) AS avg_rating, COUNT(*) AS rating_count\nFROM ratings r\nJOIN movies m ON m.movieId = r.movieId\nWHERE m.title LIKE '%${keyword.replaceAll("'", "''")}%'\nGROUP BY m.movieId, m.title\nORDER BY rating_count DESC, avg_rating DESC\nLIMIT 8;`,
+    columns: ["title", "avg_rating", "rating_count"],
+    rows: [
+      [`${keyword} sample 1`, 4.2, 180],
+      [`${keyword} sample 2`, 4.0, 132],
+      [`${keyword} sample 3`, 3.8, 95],
+      [`${keyword} sample 4`, 3.6, 71]
+    ],
+    insight: `API is currently unavailable, so this is a local preview generated for keyword '${keyword}'.`,
+    source: "fallback"
+  };
+}
+
+function renderResult(response, statusLabel) {
+  sqlOutput.textContent = response.sql;
+  renderTable(response.columns, response.rows);
+  currentRows = response.rows;
+  drawBarChart(currentRows);
+  insightText.textContent = response.insight;
+  statusText.textContent = statusLabel;
+}
+
+async function runQuery() {
   const question = questionInput.value.trim();
   if (!question) {
     statusText.textContent = "Enter a question first.";
@@ -142,21 +234,38 @@ function fakeRunQuery() {
   statusText.textContent = "Generating SQL and insight...";
   runBtn.disabled = true;
 
-  // Simulated latency for frontend MVP without backend.
-  setTimeout(() => {
-    sqlOutput.textContent = mockResponse.sql;
-    renderTable(mockResponse.columns, mockResponse.rows);
-    drawBarChart(mockResponse.rows);
-    insightText.textContent = mockResponse.insight;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ question })
+    });
 
-    statusText.textContent = "Done";
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      const errorMessage = errorPayload?.detail || `API error (${response.status})`;
+      throw new Error(errorMessage);
+    }
+
+    const payload = await response.json();
+    renderResult(payload, `Done (source: ${payload.source || "api"})`);
+  } catch (error) {
+    const fallback = buildFallbackResponse(question);
+    renderResult(fallback, `Done (fallback): ${error.message}`);
+  } finally {
     runBtn.disabled = false;
-  }, 650);
+  }
 }
 
-runBtn.addEventListener("click", fakeRunQuery);
-window.addEventListener("resize", () => drawBarChart(mockResponse.rows));
+runBtn.addEventListener("click", runQuery);
+window.addEventListener("resize", () => {
+  if (typeof Plotly !== "undefined") {
+    Plotly.Plots.resize(chartContainer);
+  }
+});
 
 renderSampleQuestions();
 questionInput.value = sampleQuestions[0];
-fakeRunQuery();
+runQuery();

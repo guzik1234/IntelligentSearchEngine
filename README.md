@@ -47,7 +47,7 @@ The user asks a question in natural language, and the system returns:
 - FastAPI
 - PostgreSQL + SQLAlchemy
 - Streamlit
-- OpenAI API / LangGraph
+- Local template SQL Agent
 - pytest + GitHub Actions
 
 ## Out of Scope (for now)
@@ -61,3 +61,23 @@ The user asks a question in natural language, and the system returns:
 - Safety validation is active (`SELECT` only)
 - Basic metrics are reported in README
 - Project runs locally with clear setup steps
+
+## SQL Agent
+- Backend uses a dedicated SQL Agent (`backend/sql_agent.py`) to convert user questions into SQL.
+- SQL generation is local and template-based (no external LLM provider required).
+- Only `SELECT` queries are allowed (safety guard).
+
+## Local Raw Database
+- Raw files are stored in `data/raw/ml-latest-small` (`movies.csv`, `ratings.csv`, `tags.csv`, `links.csv`).
+- Backend auto-builds local SQLite DB on first run: `data/db/movielens.db`.
+- `/api/search` now executes generated SQL directly on this local DB.
+
+## Pandas / NumPy Analytics
+- Backend includes `pandas` + `numpy` analytics module: `backend/analytics.py`.
+- New endpoint: `GET /api/analytics/top-genres?limit=10`
+- Response source: `sqlite+pandas+numpy`
+
+## Run
+- `python -m pip install -r requirements.txt`
+- `python -m uvicorn backend.main:app --reload`
+- Open `http://127.0.0.1:8000/`

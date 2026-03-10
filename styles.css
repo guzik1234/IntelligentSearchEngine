@@ -247,13 +247,21 @@ th {
   color: var(--muted);
 }
 
-canvas {
+#chartCanvas {
   margin-top: 0.55rem;
   width: 100%;
   height: 220px;
   display: block;
   background: linear-gradient(180deg, #fffdf8 0%, #fff7e8 100%);
   border-radius: 10px;
+  overflow: hidden;
+}
+
+#chartCanvas .js-plotly-plot,
+#chartCanvas .plot-container,
+#chartCanvas .svg-container {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .insight p {
