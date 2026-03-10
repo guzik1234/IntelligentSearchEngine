@@ -1,10 +1,8 @@
 import csv
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -17,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "ml-latest-small"
 DB_DIR = PROJECT_ROOT / "data" / "db"
 DB_PATH = DB_DIR / "movielens.db"
-load_dotenv()
+ASSET_FILES = {"app.js", "styles.css"}
 
 
 class SearchRequest(BaseModel):
@@ -73,6 +71,12 @@ def _ensure_database() -> None:
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
+
+        def insert_from_csv(csv_name: str, sql: str, row_builder) -> None:
+            with open(RAW_DIR / csv_name, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                cur.executemany(sql, (row_builder(r) for r in reader))
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS movies (
@@ -112,47 +116,30 @@ def _ensure_database() -> None:
             """
         )
 
-        with open(RAW_DIR / "movies.csv", "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            cur.executemany(
-                "INSERT INTO movies(movieId, title, genres) VALUES (?, ?, ?)",
-                ((int(r["movieId"]), r["title"], r["genres"]) for r in reader),
-            )
-
-        with open(RAW_DIR / "ratings.csv", "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            cur.executemany(
-                "INSERT INTO ratings(userId, movieId, rating, timestamp) VALUES (?, ?, ?, ?)",
-                (
-                    (int(r["userId"]), int(r["movieId"]), float(r["rating"]), int(r["timestamp"]))
-                    for r in reader
-                ),
-            )
-
-        with open(RAW_DIR / "tags.csv", "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            cur.executemany(
-                "INSERT INTO tags(userId, movieId, tag, timestamp) VALUES (?, ?, ?, ?)",
-                (
-                    (int(r["userId"]), int(r["movieId"]), r.get("tag", ""), int(r["timestamp"]))
-                    for r in reader
-                ),
-            )
-
-        with open(RAW_DIR / "links.csv", "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            cur.executemany(
-                "INSERT INTO links(movieId, imdbId, tmdbId) VALUES (?, ?, ?)",
-                (
-                    (int(r["movieId"]), r.get("imdbId", ""), r.get("tmdbId", ""))
-                    for r in reader
-                ),
-            )
+        insert_from_csv(
+            "movies.csv",
+            "INSERT INTO movies(movieId, title, genres) VALUES (?, ?, ?)",
+            lambda r: (int(r["movieId"]), r["title"], r["genres"]),
+        )
+        insert_from_csv(
+            "ratings.csv",
+            "INSERT INTO ratings(userId, movieId, rating, timestamp) VALUES (?, ?, ?, ?)",
+            lambda r: (int(r["userId"]), int(r["movieId"]), float(r["rating"]), int(r["timestamp"])),
+        )
+        insert_from_csv(
+            "tags.csv",
+            "INSERT INTO tags(userId, movieId, tag, timestamp) VALUES (?, ?, ?, ?)",
+            lambda r: (int(r["userId"]), int(r["movieId"]), r.get("tag", ""), int(r["timestamp"])),
+        )
+        insert_from_csv(
+            "links.csv",
+            "INSERT INTO links(movieId, imdbId, tmdbId) VALUES (?, ?, ?)",
+            lambda r: (int(r["movieId"]), r.get("imdbId", ""), r.get("tmdbId", "")),
+        )
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_movieId ON ratings(movieId)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_userId ON ratings(userId)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title)")
-        conn.commit()
 
 
 def _run_sql(sql: str, keyword: str) -> tuple[list[str], list[list[Any]]]:
@@ -172,14 +159,11 @@ def frontend() -> FileResponse:
     return FileResponse(PROJECT_ROOT / "index.html")
 
 
-@app.get("/app.js")
-def frontend_js() -> FileResponse:
-    return FileResponse(PROJECT_ROOT / "app.js")
-
-
-@app.get("/styles.css")
-def frontend_css() -> FileResponse:
-    return FileResponse(PROJECT_ROOT / "styles.css")
+@app.get("/{asset_name}")
+def frontend_assets(asset_name: str) -> FileResponse:
+    if asset_name not in ASSET_FILES:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(PROJECT_ROOT / asset_name)
 
 
 @app.get("/api/health")
