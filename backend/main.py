@@ -50,16 +50,25 @@ app.add_middleware(
 )
 
 
-def _build_insight(rows: list[list[Any]], keyword: str) -> str:
+def _build_insight(rows: list[list[Any]], question: str) -> str:
     if not rows:
-        return f"No rows returned for keyword '{keyword}'. Try another question."
+        return f"No results found for: '{question}'. Try rephrasing your question."
 
     first_row = rows[0]
     return f"Returned {len(rows)} rows. First row sample: {first_row}."
 
 
+def _ensure_views(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS users AS "
+        "SELECT DISTINCT userId, userId AS username FROM ratings"
+    )
+
+
 def _ensure_database() -> None:
     if DB_PATH.exists():
+        with sqlite3.connect(DB_PATH) as conn:
+            _ensure_views(conn)
         return
 
     if not RAW_DIR.exists():
@@ -140,6 +149,7 @@ def _ensure_database() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_movieId ON ratings(movieId)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_userId ON ratings(userId)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title)")
+        _ensure_views(conn)
 
 
 def _run_sql(sql: str, keyword: str) -> tuple[list[str], list[list[Any]]]:
@@ -151,7 +161,20 @@ def _run_sql(sql: str, keyword: str) -> tuple[list[str], list[list[Any]]]:
     return columns, [list(r) for r in rows]
 
 
+def _schema_context_from_db() -> str:
+    ddl_lines: list[str] = []
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        for (sql,) in cur.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall():
+            if sql:
+                ddl_lines.append(sql.strip() + ";")
+    return "\n\n".join(ddl_lines)
+
+
 _ensure_database()
+sql_agent.set_schema_context(_schema_context_from_db())
 
 
 @app.get("/")
@@ -174,26 +197,37 @@ def health() -> dict[str, str]:
 @app.post("/api/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
     sql, keyword, sql_source = await sql_agent.generate_sql(request.question)
+
+    if not sql.strip():
+        return SearchResponse(
+            sql="No SQL generated for this question.",
+            columns=[],
+            rows=[],
+            insight=(
+                "I could not confidently map this question to the current dataset schema. "
+                "Try rephrasing with terms like ratings, tags, genres, users, or time trend."
+            ),
+            safe=True,
+            source=f"sqlite+sql-agent:{sql_source}",
+        )
+
+    is_valid, reason = sql_agent.validate_sql(sql)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Blocked by SQL validator: {reason}")
+
     try:
         columns, rows = _run_sql(sql, keyword)
-    except sqlite3.Error:
-        # Keep response resilient: fallback query still enforces SELECT-only semantics.
-        sql = (
-            "SELECT m.title, ROUND(AVG(r.rating), 2) AS avg_rating, COUNT(*) AS rating_count\n"
-            "FROM ratings r\n"
-            "JOIN movies m ON m.movieId = r.movieId\n"
-            "WHERE m.title LIKE '%' || :keyword || '%'\n"
-            "GROUP BY m.movieId, m.title\n"
-            "ORDER BY rating_count DESC, avg_rating DESC\n"
-            "LIMIT 8;"
+    except sqlite3.Error as exc:
+        return SearchResponse(
+            sql=sql,
+            columns=[],
+            rows=[],
+            insight=f"The AI generated a valid query but it failed during execution: {exc}. Try rephrasing your question.",
+            safe=True,
+            source=f"sqlite+sql-agent:{sql_source}+exec-error",
         )
-        try:
-            columns, rows = _run_sql(sql, keyword)
-            sql_source = f"{sql_source}+fallback"
-        except sqlite3.Error as exc:
-            raise HTTPException(status_code=500, detail=f"SQL execution failed: {exc}") from exc
 
-    insight = _build_insight(rows, keyword)
+    insight = _build_insight(rows, request.question)
 
     return SearchResponse(
         sql=sql,

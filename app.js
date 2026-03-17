@@ -1,9 +1,9 @@
 const sampleQuestions = [
-  "Which genre had the highest watch time in Q4?",
-  "How did churn change between Q3 and Q4?",
-  "Which movies have the highest completion rate?",
-  "What is the average rating by genre?",
-  "Which user segment shows the best retention?"
+  "Which users rated the highest number of distinct movies?",
+  "Show movies with the highest number of unique tags.",
+  "Which tags appear most frequently in the dataset?",
+  "Which movies have many ratings but few tags?",
+  "How did the number of submitted ratings change year over year?"
 ];
 
 const el = {
@@ -86,14 +86,11 @@ function renderChart(rows = []) {
 }
 
 function fallback(question) {
-  const key = (question.toLowerCase().match(/[a-z0-9-]{3,}/g) || ["movie"]).slice(0, 2).join(" ");
-  const safe = key.replaceAll("'", "''");
   return {
-    sql: `SELECT m.title, ROUND(AVG(r.rating), 2) AS avg_rating, COUNT(*) AS rating_count\nFROM ratings r\nJOIN movies m ON m.movieId = r.movieId\nWHERE m.title LIKE '%${safe}%'\nGROUP BY m.movieId, m.title\nORDER BY rating_count DESC, avg_rating DESC\nLIMIT 8;`,
-    columns: ["title", "avg_rating", "rating_count"],
-    rows: [[`${key} sample 1`, 4.2, 180], [`${key} sample 2`, 4, 132], [`${key} sample 3`, 3.8, 95]],
-    insight: `Fallback preview for keyword '${key}'.`,
-    source: "fallback"
+    sql: "No SQL generated (API unavailable).",
+    columns: [],
+    rows: [],
+    insight: "The API is unavailable right now. Please try again in a moment."
   };
 }
 

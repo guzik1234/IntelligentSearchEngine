@@ -31,9 +31,20 @@ The user asks a question in natural language, and the system returns:
 - What is the average rating by genre?
 - Which user segment shows the best retention?
 
+## English Test Prompts
+- Which users rated the highest number of distinct movies?
+- Show movies with the highest number of unique tags.
+- Which tags appear most frequently in the dataset?
+- Which movies have many ratings but few tags?
+- Which titles have the largest rating variance?
+- How did the number of submitted ratings change year over year?
+- Show the monthly trend of active users.
+- Which movies have IMDb links but no TMDB links?
+- Which users tag movies more often than they rate them?
+- Show the top 20 most-rated movies.
+
 ## Data Sources
 - MovieLens dataset (movies, ratings)
-- Optional enrichment: TMDB metadata
 - Synthetic watch-history events for analytics KPIs
 
 ## Success Metrics
@@ -64,8 +75,25 @@ The user asks a question in natural language, and the system returns:
 
 ## SQL Agent
 - Backend uses a dedicated SQL Agent (`backend/sql_agent.py`) to convert user questions into SQL.
-- SQL generation is local and template-based (no external LLM provider required).
+- SQL generation uses a concrete local model via Ollama: `sqlcoder:7b`.
+- If the model is unavailable, backend falls back to built-in SQL templates.
 - Only `SELECT` queries are allowed (safety guard).
+
+### Guardrails / Validators
+- SQL comments are blocked (`--`, `/* */`).
+- Multi-statement SQL is blocked.
+- Only whitelisted tables are allowed: `movies`, `ratings`, `tags`, `links`.
+- LIMIT guardrail is enforced (default LIMIT added if missing, max capped).
+
+### Where The Model Learns DB Context
+- On startup, backend reads real schema from SQLite (`sqlite_master` + `PRAGMA table_info`).
+- This live schema is injected into SQL Agent prompt via `sql_agent.set_schema_context(...)`.
+- The model does not retrain; it gets current DB schema as prompt context at runtime.
+
+### Ollama Setup
+- Install Ollama: `https://ollama.com`
+- Pull model: `ollama pull sqlcoder:7b`
+- Start Ollama service, then run backend.
 
 ## Local Raw Database
 - Raw files are stored in `data/raw/ml-latest-small` (`movies.csv`, `ratings.csv`, `tags.csv`, `links.csv`).
