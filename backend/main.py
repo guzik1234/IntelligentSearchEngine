@@ -152,10 +152,10 @@ def _ensure_database() -> None:
         _ensure_views(conn)
 
 
-def _run_sql(sql: str, keyword: str) -> tuple[list[str], list[list[Any]]]:
+def _run_sql(sql: str) -> tuple[list[str], list[list[Any]]]:
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute(sql, {"keyword": keyword})
+        cur.execute(sql)
         rows = cur.fetchmany(50)
         columns = [d[0] for d in cur.description] if cur.description else []
     return columns, [list(r) for r in rows]
@@ -196,7 +196,7 @@ def health() -> dict[str, str]:
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
-    sql, keyword, sql_source = await sql_agent.generate_sql(request.question)
+    sql, sql_source = await sql_agent.generate_sql(request.question)
 
     if not sql.strip():
         return SearchResponse(
@@ -211,12 +211,8 @@ async def search(request: SearchRequest) -> SearchResponse:
             source=f"sqlite+sql-agent:{sql_source}",
         )
 
-    is_valid, reason = sql_agent.validate_sql(sql)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Blocked by SQL validator: {reason}")
-
     try:
-        columns, rows = _run_sql(sql, keyword)
+        columns, rows = _run_sql(sql)
     except sqlite3.Error as exc:
         return SearchResponse(
             sql=sql,

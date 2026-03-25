@@ -32,7 +32,6 @@ DEFAULT_OLLAMA_URL: Final[str] = "http://127.0.0.1:11434/api/generate"
 DEFAULT_OLLAMA_MODEL: Final[str] = "sqlcoder:7b"
 
 
-
 class SQLAgent:
     def __init__(self) -> None:
         self.ollama_url = os.getenv("OLLAMA_URL", DEFAULT_OLLAMA_URL).strip()
@@ -58,9 +57,6 @@ class SQLAgent:
         if ";" in s:
             return False
         return True
-
-    def _build_system_prompt(self) -> str:
-        return f"{SYSTEM_PROMPT_HEADER}\nSchema context:\n{self.schema_context}"
 
     def _apply_limit_guardrail(self, sql: str) -> str:
         stripped = sql.strip().rstrip(";")
@@ -120,24 +116,26 @@ class SQLAgent:
         return cleaned
 
     def _generate_with_ollama(self, question: str) -> str:
-        prompt = (
-            f"### Task\n"
-            f"Generate a SQL query to answer [QUESTION]{question}[/QUESTION]\n\n"
-            f"### Database Schema\n"
-            f"The query will run on a SQLite database with the following schema:\n"
-            f"{self.schema_context}\n\n"
-            f"### Rules\n"
-            f"{SYSTEM_PROMPT_HEADER}\n\n"
-            f"### Schema Hints\n"
-            f"-- movies.title = full movie name (e.g. 'Toy Story (1995)')\n"
-            f"-- movies.genres = pipe-separated genre categories (e.g. 'Comedy|Drama')\n"
-            f"-- There is no separate genres table; always use movies.genres column\n"
-            f"-- Standard join: ratings r JOIN movies m ON r.movieId = m.movieId\n"
-            f"-- userId is available as ratings.userId (no separate users table needed)\n\n"
-            f"### Answer\n"
-            f"Given the database schema, here is the SQL query that answers "
-            f"[QUESTION]{question}[/QUESTION]:\n\n"
-        )
+        prompt = f"""### Task
+Generate a SQL query to answer [QUESTION]{question}[/QUESTION]
+
+### Database Schema
+The query will run on a SQLite database with the following schema:
+{self.schema_context}
+
+### Rules
+{SYSTEM_PROMPT_HEADER}
+
+### Schema Hints
+-- movies.title = full movie name (e.g. 'Toy Story (1995)')
+-- movies.genres = pipe-separated genre categories (e.g. 'Comedy|Drama')
+-- There is no separate genres table; always use movies.genres column
+-- Standard join: ratings r JOIN movies m ON r.movieId = m.movieId
+-- userId is available as ratings.userId (no separate users table needed)
+
+### Answer
+Given the database schema, here is the SQL query that answers [QUESTION]{question}[/QUESTION]:
+"""
         payload = {
             "model": self.ollama_model,
             "prompt": prompt,
@@ -155,19 +153,19 @@ class SQLAgent:
             body = json.loads(res.read().decode("utf-8"))
         return self._extract_sql_block(body.get("response", ""))
 
-    async def generate_sql(self, question: str) -> tuple[str, str, str]:
+    async def generate_sql(self, question: str) -> tuple[str, str]:
         try:
             sql = self._generate_with_ollama(question)
             source = f"ollama:{self.ollama_model}"
         except Exception:
-            return "", "", "ollama-unavailable"
+            return "", "ollama-unavailable"
 
         if not sql.strip():
-            return "", "", f"ollama:{self.ollama_model}+empty-response"
+            return "", f"ollama:{self.ollama_model}+empty-response"
 
         is_valid, reason = self.validate_sql(sql)
         if not is_valid:
-            return "", "", f"ollama:{self.ollama_model}+invalid-sql:{reason}"
+            return "", f"ollama:{self.ollama_model}+invalid-sql:{reason}"
 
         sql = self._apply_limit_guardrail(sql)
-        return sql, "", source
+        return sql, source
