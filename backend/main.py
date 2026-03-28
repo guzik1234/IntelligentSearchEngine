@@ -91,7 +91,9 @@ def _ensure_database() -> None:
             CREATE TABLE IF NOT EXISTS movies (
                 movieId INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
-                genres TEXT NOT NULL
+                genres TEXT NOT NULL,
+                description TEXT,
+                plot TEXT
             )
             """
         )
@@ -127,8 +129,8 @@ def _ensure_database() -> None:
 
         insert_from_csv(
             "movies.csv",
-            "INSERT INTO movies(movieId, title, genres) VALUES (?, ?, ?)",
-            lambda r: (int(r["movieId"]), r["title"], r["genres"]),
+            "INSERT INTO movies(movieId, title, genres, description, plot) VALUES (?, ?, ?, ?, ?)",
+            lambda r: (int(r["movieId"]), r["title"], r["genres"], r.get("description") or None, r.get("plot") or None),
         )
         insert_from_csv(
             "ratings.csv",
