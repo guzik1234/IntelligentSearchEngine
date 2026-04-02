@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.analytics import top_genres_from_sqlite
+from backend.semantic_search import SemanticSearchEngine
 from backend.sql_agent import SQLAgent
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -38,8 +39,29 @@ class AnalyticsResponse(BaseModel):
     source: str
 
 
+class SemanticSearchRequest(BaseModel):
+    query: str = Field(min_length=3, max_length=500)
+    top_k: int = Field(default=10, ge=1, le=50)
+
+
+class SemanticSearchResult(BaseModel):
+    movieId: int
+    title: str
+    genres: str
+    description: str | None
+    plot: str | None
+    score: float
+
+
+class SemanticSearchResponse(BaseModel):
+    results: list[SemanticSearchResult]
+    query: str
+    total: int
+
+
 app = FastAPI(title="IntelligentSearchEngine API", version="0.1.0")
 sql_agent = SQLAgent()
+semantic_engine = SemanticSearchEngine()
 
 app.add_middleware(
     CORSMiddleware,
@@ -234,6 +256,17 @@ async def search(request: SearchRequest) -> SearchResponse:
         insight=insight,
         safe=True,
         source=f"sqlite+sql-agent:{sql_source}",
+    )
+
+
+@app.post("/api/semantic-search", response_model=SemanticSearchResponse)
+async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
+    await semantic_engine.ensure_loaded(DB_PATH)
+    results = semantic_engine.search(request.query, top_k=request.top_k)
+    return SemanticSearchResponse(
+        results=results,
+        query=request.query,
+        total=len(results),
     )
 
 

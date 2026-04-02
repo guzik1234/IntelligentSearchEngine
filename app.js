@@ -132,3 +132,90 @@ el.run.addEventListener("click", runQuery);
 renderSamples();
 el.input.value = sampleQuestions[0];
 runQuery();
+
+// ─── Semantic Search ─────────────────────────────────────────────────────────
+
+const semEl = {
+  input: document.getElementById("semanticInput"),
+  btn: document.getElementById("semanticBtn"),
+  status: document.getElementById("semanticStatus"),
+  head: document.getElementById("semanticHead"),
+  body: document.getElementById("semanticBody")
+};
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderSemanticResults(results) {
+  semEl.head.innerHTML =
+    "<tr><th>#</th><th>Title</th><th>Genres</th><th>Match</th><th>Description</th></tr>";
+
+  if (!results.length) {
+    semEl.body.innerHTML = "<tr><td colspan='5'>No results found.</td></tr>";
+    return;
+  }
+
+  semEl.body.innerHTML = results
+    .map(
+      (r, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${escHtml(r.title)}</td>
+        <td>${escHtml((r.genres || "").replace(/\|/g, ", "))}</td>
+        <td>${(r.score * 100).toFixed(1)}%</td>
+        <td class="cell--desc">${escHtml(r.description || r.plot || "—")}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+async function runSemanticSearch() {
+  const query = semEl.input.value.trim();
+  if (!query) return (semEl.status.textContent = "Enter a description first.");
+
+  semEl.btn.disabled = true;
+  semEl.status.textContent = "Searching… (first run may take 1–2 min to build embeddings)";
+
+  try {
+    const res = await fetch("/api/semantic-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: 10 })
+    });
+
+    if (!res.ok) throw new Error(`API error (${res.status})`);
+    const out = await res.json();
+    renderSemanticResults(out.results);
+    semEl.status.textContent = `Found ${out.total} matching movies`;
+  } catch (e) {
+    semEl.status.textContent = `Error: ${e.message}`;
+  } finally {
+    semEl.btn.disabled = false;
+  }
+}
+
+semEl.btn.addEventListener("click", runSemanticSearch);
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  const sqlPane = document.getElementById("paneSql");
+  const semPane = document.getElementById("paneSemantic");
+  const sqlTab = document.getElementById("tabSql");
+  const semTab = document.getElementById("tabSemantic");
+
+  const isSql = name === "sql";
+  sqlPane.hidden = !isSql;
+  semPane.hidden = isSql;
+  sqlTab.classList.toggle("tab--active", isSql);
+  semTab.classList.toggle("tab--active", !isSql);
+  sqlTab.setAttribute("aria-selected", String(isSql));
+  semTab.setAttribute("aria-selected", String(!isSql));
+}
+
+document.getElementById("tabSql").addEventListener("click", () => switchTab("sql"));
+document.getElementById("tabSemantic").addEventListener("click", () => switchTab("semantic"));

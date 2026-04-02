@@ -287,6 +287,64 @@ th {
   }
 }
 
+/* ─── Tabs ───────────────────────────────────────────────────────────────── */
+
+.tabs {
+  width: min(1120px, calc(100% - 2rem));
+  margin-inline: auto;
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: -1px;
+}
+
+.tab {
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  padding: 0.55rem 1.2rem;
+  background: var(--bg-strong);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.tab:hover {
+  background: var(--card);
+  color: var(--text);
+}
+
+.tab--active {
+  background: var(--card);
+  color: var(--accent);
+  border-color: var(--line);
+  position: relative;
+  z-index: 1;
+}
+
+/* Semantic search: description cell */
+.cell--desc {
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Semantic search button */
+#semanticBtn {
+  border: 0;
+  border-radius: 12px;
+  padding: 0.62rem 1rem;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent-2), #2aabb5);
+  cursor: pointer;
+}
+
 @keyframes rise {
   from {
     opacity: 0;

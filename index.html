@@ -29,7 +29,12 @@
       </div>
     </header>
 
-    <main class="app-shell">
+    <nav class="tabs" role="tablist" aria-label="View switcher">
+      <button class="tab tab--active" id="tabSql" role="tab" aria-selected="true" aria-controls="paneSql">SQL Insights</button>
+      <button class="tab" id="tabSemantic" role="tab" aria-selected="false" aria-controls="paneSemantic">Semantic Search</button>
+    </nav>
+
+    <main class="app-shell" id="paneSql" role="tabpanel">
       <section class="panel panel--query">
         <h2>Ask a Question</h2>
         <p class="panel__hint">Try one of the sample questions or type your own.</p>
@@ -78,6 +83,39 @@
         <article class="result-card insight">
           <h3>Business Insight</h3>
           <p id="insightText">Insight will appear here.</p>
+        </article>
+      </section>
+    </main>
+
+    <main class="app-shell" id="paneSemantic" role="tabpanel" hidden>
+      <section class="panel panel--query">
+        <h2>Search by Description</h2>
+        <p class="panel__hint">Describe a movie in your own words — the engine will find the most similar titles.</p>
+
+        <label for="semanticInput" class="sr-only">Movie description</label>
+        <textarea
+          id="semanticInput"
+          rows="4"
+          placeholder="e.g. A story about toys that secretly come to life when humans aren't watching..."
+        ></textarea>
+
+        <div class="actions">
+          <button id="semanticBtn" type="button">Find Movies</button>
+          <span class="status" id="semanticStatus">Ready</span>
+        </div>
+      </section>
+
+      <section class="panel panel--result">
+        <div class="result-head">
+          <h2>Matching Movies</h2>
+        </div>
+        <article class="result-card">
+          <div class="table-wrap">
+            <table>
+              <thead id="semanticHead"></thead>
+              <tbody id="semanticBody"></tbody>
+            </table>
+          </div>
         </article>
       </section>
     </main>
