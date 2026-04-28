@@ -345,6 +345,100 @@ th {
   cursor: pointer;
 }
 
+/* ─── Movie card grid ────────────────────────────────────────────────────── */
+
+.movie-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.movie-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 150ms, transform 150ms;
+}
+
+.movie-card:hover {
+  box-shadow: 0 6px 20px rgba(31, 26, 22, 0.14);
+  transform: translateY(-2px);
+}
+
+.movie-card__poster {
+  width: 100%;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-strong);
+}
+
+.movie-card__body {
+  padding: 0.5rem 0.55rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  flex: 1;
+}
+
+.movie-card__title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.movie-card__genres {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.movie-card__score {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-2);
+}
+
+.movie-card__desc {
+  margin: 0;
+  font-size: 0.73rem;
+  color: var(--muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.no-results {
+  color: var(--muted);
+  text-align: center;
+  padding: 1.5rem 0;
+}
+
+/* Poster thumbnail in SQL results table */
+.table-poster {
+  width: 40px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
 @keyframes rise {
   from {
     opacity: 0;

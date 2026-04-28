@@ -31,7 +31,7 @@ function renderSamples() {
   });
 }
 
-function renderTable(columns = [], rows = []) {
+function renderTable(columns = [], rows = [], posters = {}) {
   el.head.innerHTML = `<tr>${columns.map((c) => `<th>${c}</th>`).join("")}</tr>`;
 
   if (!rows.length) {
@@ -39,8 +39,18 @@ function renderTable(columns = [], rows = []) {
     return;
   }
 
+  const midIdx = columns.indexOf("movieId");
+
   el.body.innerHTML = rows
-    .map((r) => `<tr>${r.map((v) => `<td>${v}</td>`).join("")}</tr>`)
+    .map((r) => {
+      const cells = r.map((v, i) => {
+        if (i === midIdx && posters[v]) {
+          return `<td><img class="table-poster" src="${escHtml(posters[v])}" alt="poster" loading="lazy"></td>`;
+        }
+        return `<td>${v}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    })
     .join("");
 }
 
@@ -112,14 +122,14 @@ async function runQuery() {
     const out = await res.json();
 
     el.sql.textContent = out.sql;
-    renderTable(out.columns, out.rows);
+    renderTable(out.columns, out.rows, out.posters || {});
     renderChart(out.rows);
     el.insight.textContent = out.insight;
     el.status.textContent = `Done (source: ${out.source || "api"})`;
   } catch (e) {
     const out = fallback(question);
     el.sql.textContent = out.sql;
-    renderTable(out.columns, out.rows);
+    renderTable(out.columns, out.rows, {});
     renderChart(out.rows);
     el.insight.textContent = out.insight;
     el.status.textContent = `Done (fallback): ${e.message}`;
@@ -139,8 +149,7 @@ const semEl = {
   input: document.getElementById("semanticInput"),
   btn: document.getElementById("semanticBtn"),
   status: document.getElementById("semanticStatus"),
-  head: document.getElementById("semanticHead"),
-  body: document.getElementById("semanticBody")
+  cards: document.getElementById("semanticCards")
 };
 
 function escHtml(str) {
@@ -151,24 +160,31 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-function renderSemanticResults(results) {
-  semEl.head.innerHTML =
-    "<tr><th>#</th><th>Title</th><th>Genres</th><th>Match</th><th>Description</th></tr>";
+const POSTER_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='240' viewBox='0 0 160 240'%3E%3Crect width='160' height='240' fill='%23efe5d6'/%3E%3Ctext x='80' y='125' text-anchor='middle' fill='%235d524a' font-size='13' font-family='sans-serif'%3ENo poster%3C/text%3E%3C/svg%3E";
 
+function renderSemanticResults(results) {
   if (!results.length) {
-    semEl.body.innerHTML = "<tr><td colspan='5'>No results found.</td></tr>";
+    semEl.cards.innerHTML = "<p class='no-results'>No results found.</p>";
     return;
   }
 
-  semEl.body.innerHTML = results
+  semEl.cards.innerHTML = results
     .map(
-      (r, i) => `<tr>
-        <td>${i + 1}</td>
-        <td>${escHtml(r.title)}</td>
-        <td>${escHtml((r.genres || "").replace(/\|/g, ", "))}</td>
-        <td>${(r.score * 100).toFixed(1)}%</td>
-        <td class="cell--desc">${escHtml(r.description || r.plot || "—")}</td>
-      </tr>`
+      (r) => `<div class="movie-card">
+        <img
+          class="movie-card__poster"
+          src="${r.poster_url ? escHtml(r.poster_url) : POSTER_PLACEHOLDER}"
+          alt="${escHtml(r.title)}"
+          loading="lazy"
+          onerror="this.src='${POSTER_PLACEHOLDER}'"
+        />
+        <div class="movie-card__body">
+          <p class="movie-card__title">${escHtml(r.title)}</p>
+          <p class="movie-card__genres">${escHtml((r.genres || "").replace(/\|/g, " · "))}</p>
+          <p class="movie-card__score">${(r.score * 100).toFixed(1)}% match</p>
+          <p class="movie-card__desc">${escHtml(r.description || r.plot || "")}</p>
+        </div>
+      </div>`
     )
     .join("");
 }
@@ -178,7 +194,7 @@ async function runSemanticSearch() {
   if (!query) return (semEl.status.textContent = "Enter a description first.");
 
   semEl.btn.disabled = true;
-  semEl.status.textContent = "Searching… (first run may take 1–2 min to build embeddings)";
+  semEl.status.textContent = "Searching\u2026 (first run may take 1\u20132 min to build embeddings)";
 
   try {
     const res = await fetch("/api/semantic-search", {

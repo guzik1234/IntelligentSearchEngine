@@ -1,0 +1,22 @@
+# Environment variables (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Data / generated files
+data/db/*.db
+data/db/embeddings.npy
+data/db/embeddings_meta.json
+data/db/embeddings_model.txt
+
+# OS
+.DS_Store
+Thumbs.db

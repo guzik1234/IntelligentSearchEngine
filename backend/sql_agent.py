@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -30,10 +31,13 @@ ALLOWED_TABLES: Final[set[str]] = {"movies", "ratings", "tags", "links", "users"
 
 DEFAULT_OLLAMA_URL: Final[str] = "http://127.0.0.1:11434/api/generate"
 DEFAULT_OLLAMA_MODEL: Final[str] = "sqlcoder:7b"
+DEFAULT_GROQ_MODEL: Final[str] = "llama-3.3-70b-versatile"
 
 
 class SQLAgent:
     def __init__(self) -> None:
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
+        self.groq_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip() or DEFAULT_GROQ_MODEL
         self.ollama_url = os.getenv("OLLAMA_URL", DEFAULT_OLLAMA_URL).strip()
         self.ollama_model = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
         self.schema_context = (
@@ -115,6 +119,37 @@ class SQLAgent:
         cleaned = re.sub(r"\bgenre\b", "genres", cleaned, flags=re.IGNORECASE)
         return cleaned
 
+    def _generate_with_groq(self, question: str) -> str:
+        from groq import Groq  # type: ignore[import-untyped]
+
+        client = Groq(api_key=self.groq_api_key)
+        user_prompt = f"""### Task
+Generate a SQL query to answer: {question}
+
+### Database Schema
+The query will run on a SQLite database with the following schema:
+{self.schema_context}
+
+### Schema Hints
+-- movies.title = full movie name (e.g. 'Toy Story (1995)')
+-- movies.genres = pipe-separated genre categories (e.g. 'Comedy|Drama')
+-- There is no separate genres table; always use movies.genres column
+-- Standard join: ratings r JOIN movies m ON r.movieId = m.movieId
+-- userId is available as ratings.userId (no separate users table needed)
+
+Return ONLY the SQL query, nothing else."""
+
+        response = client.chat.completions.create(
+            model=self.groq_model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_HEADER},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            max_tokens=512,
+        )
+        return self._extract_sql_block(response.choices[0].message.content or "")
+
     def _generate_with_ollama(self, question: str) -> str:
         prompt = f"""### Task
 Generate a SQL query to answer [QUESTION]{question}[/QUESTION]
@@ -154,18 +189,27 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
         return self._extract_sql_block(body.get("response", ""))
 
     async def generate_sql(self, question: str) -> tuple[str, str]:
-        try:
-            sql = self._generate_with_ollama(question)
-            source = f"ollama:{self.ollama_model}"
-        except Exception:
-            return "", "ollama-unavailable"
+        # Prefer Groq when API key is configured
+        if self.groq_api_key:
+            try:
+                sql = await asyncio.to_thread(self._generate_with_groq, question)
+                source = f"groq:{self.groq_model}"
+            except Exception:
+                return "", "groq-error"
+        else:
+            # Fallback to Ollama
+            try:
+                sql = self._generate_with_ollama(question)
+                source = f"ollama:{self.ollama_model}"
+            except Exception:
+                return "", "ollama-unavailable"
 
         if not sql.strip():
-            return "", f"ollama:{self.ollama_model}+empty-response"
+            return "", f"{source}+empty-response"
 
         is_valid, reason = self.validate_sql(sql)
         if not is_valid:
-            return "", f"ollama:{self.ollama_model}+invalid-sql:{reason}"
+            return "", f"{source}+invalid-sql:{reason}"
 
         sql = self._apply_limit_guardrail(sql)
         return sql, source

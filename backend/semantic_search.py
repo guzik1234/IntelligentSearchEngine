@@ -6,9 +6,10 @@ from typing import Any
 
 import numpy as np
 
-EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
+LOCAL_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
 _EMBEDDINGS_FILE = "embeddings.npy"
 _METADATA_FILE = "embeddings_meta.json"
+_EMBEDDINGS_MODEL_FILE = "embeddings_model.txt"
 
 
 def _text_for_movie(
@@ -34,6 +35,8 @@ def _cosine_scores(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
 def _build_and_cache(db_path: Path) -> tuple[np.ndarray, list[dict[str, Any]]]:
     from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
+    model = SentenceTransformer(LOCAL_EMBEDDINGS_MODEL)
+
     with sqlite3.connect(db_path) as conn:
         cur = conn.cursor()
         cur.execute("SELECT movieId, title, genres, description, plot FROM movies")
@@ -53,15 +56,14 @@ def _build_and_cache(db_path: Path) -> tuple[np.ndarray, list[dict[str, Any]]]:
             }
         )
 
-    model = SentenceTransformer(EMBEDDINGS_MODEL)
-    embeddings: np.ndarray = model.encode(
-        texts, show_progress_bar=True, batch_size=64, convert_to_numpy=True
-    )
+    embeddings: np.ndarray = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
 
     db_dir = db_path.parent
     np.save(str(db_dir / _EMBEDDINGS_FILE), embeddings)
     with open(db_dir / _METADATA_FILE, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False)
+    with open(db_dir / _EMBEDDINGS_MODEL_FILE, "w", encoding="utf-8") as f:
+        f.write(LOCAL_EMBEDDINGS_MODEL)
 
     return embeddings, metadata
 
@@ -70,7 +72,7 @@ class SemanticSearchEngine:
     def __init__(self) -> None:
         self._embeddings: np.ndarray | None = None
         self._metadata: list[dict[str, Any]] | None = None
-        self._model: Any = None
+        self._model = None
         self._ready = False
         self._lock = asyncio.Lock()
 
@@ -80,18 +82,28 @@ class SemanticSearchEngine:
     def _load_sync(self, db_path: Path) -> None:
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
+        self._model = SentenceTransformer(LOCAL_EMBEDDINGS_MODEL)
+
         db_dir = db_path.parent
         emb_path = db_dir / _EMBEDDINGS_FILE
         meta_path = db_dir / _METADATA_FILE
+        model_file = db_dir / _EMBEDDINGS_MODEL_FILE
 
-        if emb_path.exists() and meta_path.exists():
+        # Rebuild cache if missing or built with a different model
+        cache_valid = (
+            emb_path.exists()
+            and meta_path.exists()
+            and model_file.exists()
+            and model_file.read_text(encoding="utf-8").strip() == LOCAL_EMBEDDINGS_MODEL
+        )
+
+        if cache_valid:
             self._embeddings = np.load(str(emb_path))
             with open(meta_path, "r", encoding="utf-8") as f:
                 self._metadata = json.load(f)
         else:
             self._embeddings, self._metadata = _build_and_cache(db_path)
 
-        self._model = SentenceTransformer(EMBEDDINGS_MODEL)
         self._ready = True
 
     # -------------------------------------------------------------------
@@ -108,10 +120,11 @@ class SemanticSearchEngine:
     # Semantic search
     # -------------------------------------------------------------------
     def search(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
-        if not self._ready or self._model is None or self._embeddings is None or self._metadata is None:
+        if not self._ready or self._embeddings is None or self._metadata is None or self._model is None:
             raise RuntimeError("SemanticSearchEngine is not loaded yet.")
 
-        query_vec: np.ndarray = self._model.encode([query], convert_to_numpy=True)[0]
+        query_vec: np.ndarray = self._model.encode(query, convert_to_numpy=True)
+
         scores = _cosine_scores(query_vec, self._embeddings)
         top_indices = np.argsort(scores)[::-1][:top_k]
 

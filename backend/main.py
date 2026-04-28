@@ -1,7 +1,12 @@
+import asyncio
 import csv
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +16,7 @@ from pydantic import BaseModel, Field
 from backend.analytics import top_genres_from_sqlite
 from backend.semantic_search import SemanticSearchEngine
 from backend.sql_agent import SQLAgent
+from backend import tmdb_client
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "ml-latest-small"
@@ -30,6 +36,7 @@ class SearchResponse(BaseModel):
     insight: str
     safe: bool
     source: str
+    posters: dict[str, str | None] = {}
 
 
 class AnalyticsResponse(BaseModel):
@@ -51,12 +58,27 @@ class SemanticSearchResult(BaseModel):
     description: str | None
     plot: str | None
     score: float
+    poster_url: str | None = None
 
 
 class SemanticSearchResponse(BaseModel):
     results: list[SemanticSearchResult]
     query: str
     total: int
+
+
+class MovieDetailResponse(BaseModel):
+    movieId: int
+    title: str
+    genres: str
+    description: str | None
+    plot: str | None
+    poster_url: str | None
+    tmdbId: str | None
+    imdbId: str | None
+    tmdb_rating: float | None = None
+    release_date: str | None = None
+    runtime: int | None = None
 
 
 app = FastAPI(title="IntelligentSearchEngine API", version="0.1.0")
@@ -78,6 +100,14 @@ def _build_insight(rows: list[list[Any]], question: str) -> str:
 
     first_row = rows[0]
     return f"Returned {len(rows)} rows. First row sample: {first_row}."
+
+
+def _ensure_schema_migrations() -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        existing = {row[1] for row in cur.execute("PRAGMA table_info(movies)").fetchall()}
+        if "poster_url" not in existing:
+            cur.execute("ALTER TABLE movies ADD COLUMN poster_url TEXT")
 
 
 def _ensure_views(conn: sqlite3.Connection) -> None:
@@ -198,6 +228,7 @@ def _schema_context_from_db() -> str:
 
 
 _ensure_database()
+_ensure_schema_migrations()
 sql_agent.set_schema_context(_schema_context_from_db())
 
 
@@ -249,6 +280,15 @@ async def search(request: SearchRequest) -> SearchResponse:
 
     insight = _build_insight(rows, request.question)
 
+    # Enrich with TMDB posters if movieId column present
+    posters: dict[str, str | None] = {}
+    if "movieId" in columns:
+        idx = columns.index("movieId")
+        movie_ids = [int(r[idx]) for r in rows if r[idx] is not None]
+        if movie_ids:
+            tmdb_data = await asyncio.to_thread(tmdb_client.get_posters_batch, movie_ids, DB_PATH)
+            posters = {str(mid): d.get("poster_url") for mid, d in tmdb_data.items()}
+
     return SearchResponse(
         sql=sql,
         columns=columns,
@@ -256,6 +296,7 @@ async def search(request: SearchRequest) -> SearchResponse:
         insight=insight,
         safe=True,
         source=f"sqlite+sql-agent:{sql_source}",
+        posters=posters,
     )
 
 
@@ -263,6 +304,15 @@ async def search(request: SearchRequest) -> SearchResponse:
 async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
     await semantic_engine.ensure_loaded(DB_PATH)
     results = semantic_engine.search(request.query, top_k=request.top_k)
+
+    movie_ids = [r["movieId"] for r in results]
+    posters = await asyncio.to_thread(tmdb_client.get_posters_batch, movie_ids, DB_PATH)
+    for r in results:
+        tmdb_data = posters.get(r["movieId"], {})
+        r["poster_url"] = tmdb_data.get("poster_url")
+        if not r.get("description"):
+            r["description"] = tmdb_data.get("description")
+
     return SemanticSearchResponse(
         results=results,
         query=request.query,
@@ -280,3 +330,11 @@ def analytics_top_genres(limit: int = 10) -> AnalyticsResponse:
         insight=insight,
         source="sqlite+pandas+numpy",
     )
+
+
+@app.get("/api/movies/{movie_id}", response_model=MovieDetailResponse)
+async def movie_detail(movie_id: int) -> MovieDetailResponse:
+    details = await asyncio.to_thread(tmdb_client.get_movie_details, movie_id, DB_PATH)
+    if details is None:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    return MovieDetailResponse(**details)

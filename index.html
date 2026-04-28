@@ -98,21 +98,16 @@
 
         <div class="actions">
           <button id="semanticBtn" type="button">Find Movies</button>
-          <span class="status" id="semanticStatus">Ready</span>
         </div>
       </section>
 
       <section class="panel panel--result">
         <div class="result-head">
           <h2>Matching Movies</h2>
+          <span class="status" id="semanticStatus">Ready</span>
         </div>
         <article class="result-card">
-          <div class="table-wrap">
-            <table>
-              <thead id="semanticHead"></thead>
-              <tbody id="semanticBody"></tbody>
-            </table>
-          </div>
+          <div id="semanticCards" class="movie-grid"></div>
         </article>
       </section>
     </main>
