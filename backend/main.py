@@ -1,6 +1,5 @@
-import asyncio
-import csv
-import sqlite3
+﻿import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,79 +10,82 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.analytics import top_genres_from_sqlite
-from backend.semantic_search import SemanticSearchEngine
 from backend.sql_agent import SQLAgent
-from backend import tmdb_client
+from backend import tmdb_search
 
+log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "data" / "raw" / "ml-latest-small"
-DB_DIR = PROJECT_ROOT / "data" / "db"
-DB_PATH = DB_DIR / "movielens.db"
 ASSET_FILES = {"app.js", "styles.css"}
 
 
+# --- Request / Response models ---
+
 class SearchRequest(BaseModel):
     question: str = Field(min_length=3, max_length=300)
+    page: int = Field(default=1, ge=1, le=20)
+
+
+class FilterRequest(BaseModel):
+    params: dict = Field(default_factory=dict)
+    page: int = Field(default=1, ge=1, le=20)
+
+
+class MovieCard(BaseModel):
+    movieId: int
+    title: str
+    genres: str
+    description: str | None = None
+    poster_url: str | None = None
+    release_date: str | None = None
+    tmdb_rating: float | None = None
+    score: float | None = None
 
 
 class SearchResponse(BaseModel):
-    sql: str
-    columns: list[str]
-    rows: list[list[Any]]
-    insight: str
-    safe: bool
-    source: str
-    posters: dict[str, str | None] = {}
-
-
-class AnalyticsResponse(BaseModel):
-    columns: list[str]
-    rows: list[list[Any]]
+    movies: list[MovieCard]
+    query_params: dict
     insight: str
     source: str
+    page: int
+    has_more: bool
 
 
 class SemanticSearchRequest(BaseModel):
     query: str = Field(min_length=3, max_length=500)
-    top_k: int = Field(default=10, ge=1, le=50)
-
-
-class SemanticSearchResult(BaseModel):
-    movieId: int
-    title: str
-    genres: str
-    description: str | None
-    plot: str | None
-    score: float
-    poster_url: str | None = None
+    top_k: int = Field(default=20, ge=1, le=50)
+    page: int = Field(default=1, ge=1, le=20)
 
 
 class SemanticSearchResponse(BaseModel):
-    results: list[SemanticSearchResult]
+    results: list[MovieCard]
     query: str
     total: int
+    page: int
+    has_more: bool
 
 
 class MovieDetailResponse(BaseModel):
     movieId: int
     title: str
     genres: str
-    description: str | None
-    plot: str | None
-    poster_url: str | None
-    tmdbId: str | None
-    imdbId: str | None
+    description: str | None = None
+    plot: str | None = None
+    poster_url: str | None = None
+    tmdbId: str | None = None
+    imdbId: str | None = None
     tmdb_rating: float | None = None
     release_date: str | None = None
     runtime: int | None = None
 
 
-app = FastAPI(title="IntelligentSearchEngine API", version="0.1.0")
+# --- App setup ---
+
+app = FastAPI(title="IntelligentSearchEngine API", version="0.2.0")
 sql_agent = SQLAgent()
-semantic_engine = SemanticSearchEngine()
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,143 +96,16 @@ app.add_middleware(
 )
 
 
-def _build_insight(rows: list[list[Any]], question: str) -> str:
-    if not rows:
-        return f"No results found for: '{question}'. Try rephrasing your question."
-
-    first_row = rows[0]
-    return f"Returned {len(rows)} rows. First row sample: {first_row}."
-
-
-def _ensure_schema_migrations() -> None:
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        existing = {row[1] for row in cur.execute("PRAGMA table_info(movies)").fetchall()}
-        if "poster_url" not in existing:
-            cur.execute("ALTER TABLE movies ADD COLUMN poster_url TEXT")
-
-
-def _ensure_views(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        "CREATE VIEW IF NOT EXISTS users AS "
-        "SELECT DISTINCT userId, userId AS username FROM ratings"
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc: Exception) -> JSONResponse:
+    log.exception("Unhandled error: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again."},
     )
 
 
-def _ensure_database() -> None:
-    if DB_PATH.exists():
-        with sqlite3.connect(DB_PATH) as conn:
-            _ensure_views(conn)
-        return
-
-    if not RAW_DIR.exists():
-        raise RuntimeError(
-            f"MovieLens raw data not found at '{RAW_DIR}'. Download/extract dataset first."
-        )
-
-    DB_DIR.mkdir(parents=True, exist_ok=True)
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-
-        def insert_from_csv(csv_name: str, sql: str, row_builder) -> None:
-            with open(RAW_DIR / csv_name, "r", encoding="utf-8", newline="") as f:
-                reader = csv.DictReader(f)
-                cur.executemany(sql, (row_builder(r) for r in reader))
-
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS movies (
-                movieId INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                genres TEXT NOT NULL,
-                description TEXT,
-                plot TEXT
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ratings (
-                userId INTEGER NOT NULL,
-                movieId INTEGER NOT NULL,
-                rating REAL NOT NULL,
-                timestamp INTEGER NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tags (
-                userId INTEGER NOT NULL,
-                movieId INTEGER NOT NULL,
-                tag TEXT,
-                timestamp INTEGER NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS links (
-                movieId INTEGER PRIMARY KEY,
-                imdbId TEXT,
-                tmdbId TEXT
-            )
-            """
-        )
-
-        insert_from_csv(
-            "movies.csv",
-            "INSERT INTO movies(movieId, title, genres, description, plot) VALUES (?, ?, ?, ?, ?)",
-            lambda r: (int(r["movieId"]), r["title"], r["genres"], r.get("description") or None, r.get("plot") or None),
-        )
-        insert_from_csv(
-            "ratings.csv",
-            "INSERT INTO ratings(userId, movieId, rating, timestamp) VALUES (?, ?, ?, ?)",
-            lambda r: (int(r["userId"]), int(r["movieId"]), float(r["rating"]), int(r["timestamp"])),
-        )
-        insert_from_csv(
-            "tags.csv",
-            "INSERT INTO tags(userId, movieId, tag, timestamp) VALUES (?, ?, ?, ?)",
-            lambda r: (int(r["userId"]), int(r["movieId"]), r.get("tag", ""), int(r["timestamp"])),
-        )
-        insert_from_csv(
-            "links.csv",
-            "INSERT INTO links(movieId, imdbId, tmdbId) VALUES (?, ?, ?)",
-            lambda r: (int(r["movieId"]), r.get("imdbId", ""), r.get("tmdbId", "")),
-        )
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_movieId ON ratings(movieId)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_ratings_userId ON ratings(userId)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title)")
-        _ensure_views(conn)
-
-
-def _run_sql(sql: str) -> tuple[list[str], list[list[Any]]]:
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute(sql)
-        rows = cur.fetchmany(50)
-        columns = [d[0] for d in cur.description] if cur.description else []
-    return columns, [list(r) for r in rows]
-
-
-def _schema_context_from_db() -> str:
-    ddl_lines: list[str] = []
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        for (sql,) in cur.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' ORDER BY name"
-        ).fetchall():
-            if sql:
-                ddl_lines.append(sql.strip() + ";")
-    return "\n\n".join(ddl_lines)
-
-
-_ensure_database()
-_ensure_schema_migrations()
-sql_agent.set_schema_context(_schema_context_from_db())
-
+# --- Static files ---
 
 @app.get("/")
 def frontend() -> FileResponse:
@@ -244,97 +119,112 @@ def frontend_assets(asset_name: str) -> FileResponse:
     return FileResponse(PROJECT_ROOT / asset_name)
 
 
+# --- API endpoints ---
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "db": str(DB_PATH)}
+    return {"status": "ok"}
+
+
+@app.post("/api/filter", response_model=SearchResponse)
+async def filter_movies(request: FilterRequest) -> SearchResponse:
+    """Direct TMDB discover — no LLM, params come straight from the UI."""
+    try:
+        movies = await asyncio.to_thread(tmdb_search.discover_movies, request.params, request.page)
+    except Exception as exc:
+        log.error("TMDB filter failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
+
+    insight = (
+        f"Found {len(movies)} movies matching your filters."
+        if movies
+        else "No movies found. Try adjusting the filters."
+    )
+    return SearchResponse(
+        movies=[MovieCard(**m) for m in movies],
+        query_params=request.params,
+        insight=insight,
+        source="tmdb:discover",
+        page=request.page,
+        has_more=len(movies) == 20,
+    )
 
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
-    sql, sql_source = await sql_agent.generate_sql(request.question)
-
-    if not sql.strip():
-        return SearchResponse(
-            sql="No SQL generated for this question.",
-            columns=[],
-            rows=[],
-            insight=(
-                "I could not confidently map this question to the current dataset schema. "
-                "Try rephrasing with terms like ratings, tags, genres, users, or time trend."
-            ),
-            safe=True,
-            source=f"sqlite+sql-agent:{sql_source}",
-        )
+    try:
+        params, source = await sql_agent.generate_tmdb_params(request.question)
+    except Exception as exc:
+        log.warning("Groq param extraction failed: %s", exc)
+        params, source = {"keyword": request.question}, "fallback"
 
     try:
-        columns, rows = _run_sql(sql)
-    except sqlite3.Error as exc:
-        return SearchResponse(
-            sql=sql,
-            columns=[],
-            rows=[],
-            insight=f"The AI generated a valid query but it failed during execution: {exc}. Try rephrasing your question.",
-            safe=True,
-            source=f"sqlite+sql-agent:{sql_source}+exec-error",
-        )
+        has_filters = any(k not in ("keyword", "sort_by") for k in params)
+        if has_filters:
+            movies = await asyncio.to_thread(tmdb_search.discover_movies, params, request.page)
+            if not movies:
+                keyword = params.get("keyword") or request.question
+                movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
+        else:
+            keyword = params.get("keyword") or request.question
+            movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
+    except Exception as exc:
+        log.error("TMDB search failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
 
-    insight = _build_insight(rows, request.question)
-
-    # Enrich with TMDB posters if movieId column present
-    posters: dict[str, str | None] = {}
-    if "movieId" in columns:
-        idx = columns.index("movieId")
-        movie_ids = [int(r[idx]) for r in rows if r[idx] is not None]
-        if movie_ids:
-            tmdb_data = await asyncio.to_thread(tmdb_client.get_posters_batch, movie_ids, DB_PATH)
-            posters = {str(mid): d.get("poster_url") for mid, d in tmdb_data.items()}
+    insight = (
+        f"Found {len(movies)} movies matching your query."
+        if movies
+        else "No movies found. Try rephrasing your question."
+    )
 
     return SearchResponse(
-        sql=sql,
-        columns=columns,
-        rows=rows,
+        movies=[MovieCard(**m) for m in movies],
+        query_params=params,
         insight=insight,
-        safe=True,
-        source=f"sqlite+sql-agent:{sql_source}",
-        posters=posters,
+        source=f"tmdb+{source}",
+        page=request.page,
+        has_more=len(movies) == 20,
     )
 
 
 @app.post("/api/semantic-search", response_model=SemanticSearchResponse)
 async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
-    await semantic_engine.ensure_loaded(DB_PATH)
-    results = semantic_engine.search(request.query, top_k=request.top_k)
+    try:
+        keyword = await sql_agent.extract_search_keyword(request.query)
+    except Exception as exc:
+        log.warning("Keyword extraction failed: %s", exc)
+        keyword = " ".join(request.query.split()[:5])
 
-    movie_ids = [r["movieId"] for r in results]
-    posters = await asyncio.to_thread(tmdb_client.get_posters_batch, movie_ids, DB_PATH)
-    for r in results:
-        tmdb_data = posters.get(r["movieId"], {})
-        r["poster_url"] = tmdb_data.get("poster_url")
-        if not r.get("description"):
-            r["description"] = tmdb_data.get("description")
+    try:
+        movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
+        if not movies and " " in keyword:
+            for word in keyword.split():
+                if len(word) > 3:
+                    movies = await asyncio.to_thread(tmdb_search.search_movies, word, request.page)
+                    if movies:
+                        break
+    except Exception as exc:
+        log.error("TMDB semantic search failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
 
+    results = movies[: request.top_k]
     return SemanticSearchResponse(
-        results=results,
+        results=[MovieCard(**m) for m in results],
         query=request.query,
         total=len(results),
-    )
-
-
-@app.get("/api/analytics/top-genres", response_model=AnalyticsResponse)
-def analytics_top_genres(limit: int = 10) -> AnalyticsResponse:
-    safe_limit = min(max(limit, 1), 30)
-    columns, rows, insight = top_genres_from_sqlite(DB_PATH, safe_limit)
-    return AnalyticsResponse(
-        columns=columns,
-        rows=rows,
-        insight=insight,
-        source="sqlite+pandas+numpy",
+        page=request.page,
+        has_more=len(movies) >= request.top_k,
     )
 
 
 @app.get("/api/movies/{movie_id}", response_model=MovieDetailResponse)
 async def movie_detail(movie_id: int) -> MovieDetailResponse:
-    details = await asyncio.to_thread(tmdb_client.get_movie_details, movie_id, DB_PATH)
-    if details is None:
+    try:
+        data = await asyncio.to_thread(tmdb_search.get_movie_detail, movie_id)
+    except Exception as exc:
+        log.error("TMDB movie detail failed for id=%s: %s", movie_id, exc)
+        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
+    if data is None:
         raise HTTPException(status_code=404, detail="Movie not found")
-    return MovieDetailResponse(**details)
+    return MovieDetailResponse(**data)

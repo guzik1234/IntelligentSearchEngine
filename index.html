@@ -17,68 +17,120 @@
     <div class="bg-shape bg-shape--two"></div>
 
     <header class="hero">
-      <p class="hero__eyebrow">AI Analytics for Movie Platforms</p>
-      <h1>IntelligentSearchEngine</h1>
+      <p class="hero__eyebrow">AI-powered Movie Discovery</p>
+      <h1>Intelligent<wbr>Search<wbr>Engine</h1>
       <p class="hero__subtitle">
-        Ask a business question in plain language. Get SQL, a result table, a chart, and a concise insight.
+        Browse by genre &amp; filters, or describe any movie in plain words &mdash; results come live from TMDB.
       </p>
       <div class="hero__tags">
-        <span>NL -> SQL</span>
-        <span>Read-only Safety</span>
-        <span>Fast Insights</span>
+        <span>🎬 Live TMDB Data</span>
+        <span>🤖 Groq AI</span>
+        <span>⚡ Fast &amp; Accurate</span>
+        <span>🔍 Natural Language Search</span>
       </div>
     </header>
 
-    
+    <nav class="tabs" role="tablist">
+      <button class="tab tab--active" id="tabSql" role="tab" aria-selected="true">Movie Search</button>
+      <button class="tab" id="tabSemantic" role="tab" aria-selected="false">Describe &amp; Find</button>
+    </nav>
 
     <main class="app-shell" id="paneSql" role="tabpanel">
       <section class="panel panel--query">
-        <h2>Ask a Question</h2>
-        <p class="panel__hint">Try one of the sample questions or type your own.</p>
+        <h2>Browse Movies</h2>
+        <p class="panel__hint">Filter by genre, year and rating — results come live from TMDB.</p>
 
-        <div class="samples" id="sampleQuestions"></div>
+        <div class="filters">
 
-        <label for="questionInput" class="sr-only">Business question</label>
-        <textarea
-          id="questionInput"
-          rows="3"
-          placeholder="e.g. Which genre had the highest watch time in Q4?"
-        ></textarea>
+          <div class="filter-group">
+            <label for="filterGenre">
+              <span class="filter-icon">🎬</span> Genre
+            </label>
+            <div class="select-wrap">
+              <select id="filterGenre">
+                <option value="">Any genre</option>
+                <option value="action">Action</option>
+                <option value="adventure">Adventure</option>
+                <option value="animation">Animation</option>
+                <option value="comedy">Comedy</option>
+                <option value="crime">Crime</option>
+                <option value="documentary">Documentary</option>
+                <option value="drama">Drama</option>
+                <option value="family">Family</option>
+                <option value="fantasy">Fantasy</option>
+                <option value="history">History</option>
+                <option value="horror">Horror</option>
+                <option value="music">Music</option>
+                <option value="mystery">Mystery</option>
+                <option value="romance">Romance</option>
+                <option value="science fiction">Sci-Fi</option>
+                <option value="thriller">Thriller</option>
+                <option value="war">War</option>
+                <option value="western">Western</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <label><span class="filter-icon">📅</span> Year range</label>
+            <div class="filter-group--row">
+              <div class="input-wrap">
+                <input id="filterYearFrom" type="text" inputmode="numeric" maxlength="4" placeholder="From" />
+              </div>
+              <span class="range-sep">–</span>
+              <div class="input-wrap">
+                <input id="filterYearTo" type="text" inputmode="numeric" maxlength="4" placeholder="To" />
+              </div>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <label for="filterRating">
+              <span class="filter-icon">⭐</span> Min rating
+              <span id="ratingValue" class="rating-chip">any</span>
+            </label>
+            <input id="filterRating" type="range" min="0" max="9" step="0.5" value="0" />
+          </div>
+
+          <div class="filter-group">
+            <label for="filterSort">
+              <span class="filter-icon">↕</span> Sort by
+            </label>
+            <div class="select-wrap">
+              <select id="filterSort">
+                <option value="popular">Most Popular</option>
+                <option value="rating">Highest Rated</option>
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="revenue">Box Office</option>
+              </select>
+            </div>
+          </div>
+
+        </div>
 
         <div class="actions">
-          <button id="runBtn" type="button">Generate Insight</button>
+          <button id="runBtn" type="button">Search</button>
+          <button id="clearBtn" type="button" class="btn--clear" hidden>Clear</button>
           <span class="status" id="statusText">Ready</span>
         </div>
       </section>
 
       <section class="panel panel--result">
         <div class="result-head">
-          <h2>Result</h2>
-          <span class="badge" id="safetyBadge">SAFE: SELECT only</span>
+          <h2>Results</h2>
         </div>
 
         <article class="result-card">
-          <h3>Generated SQL</h3>
-          <pre id="sqlOutput">-- SQL will appear here</pre>
+          <div id="sqlCards" class="movie-grid"></div>
         </article>
 
-        <article class="result-card">
-          <h3>Result Table</h3>
-          <div class="table-wrap">
-            <table>
-              <thead id="resultHead"></thead>
-              <tbody id="resultBody"></tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="result-card">
-          <h3>Chart</h3>
-          <div id="chartCanvas" role="img" aria-label="Result chart"></div>
-        </article>
+        <div class="load-more-wrap">
+          <button id="loadMoreBtn" type="button" class="btn--load-more" hidden>Load more</button>
+        </div>
 
         <article class="result-card insight">
-          <h3>Business Insight</h3>
+          <h3>Insight</h3>
           <p id="insightText">Insight will appear here.</p>
         </article>
       </section>
@@ -98,6 +150,8 @@
 
         <div class="actions">
           <button id="semanticBtn" type="button">Find Movies</button>
+          <button id="semanticClearBtn" type="button" class="btn--clear" hidden>Clear</button>
+          <span class="status" id="semanticStatusInline"></span>
         </div>
       </section>
 
@@ -109,10 +163,13 @@
         <article class="result-card">
           <div id="semanticCards" class="movie-grid"></div>
         </article>
+
+        <div class="load-more-wrap">
+          <button id="semanticLoadMoreBtn" type="button" class="btn--load-more" hidden>Load more</button>
+        </div>
       </section>
     </main>
 
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=9"></script>
   </body>
 </html>

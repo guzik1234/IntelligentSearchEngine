@@ -54,49 +54,34 @@ def test_limit_guardrail_adds_and_caps_limit() -> None:
     assert "LIMIT 200" in capped
 
 
-def test_generate_sql_falls_back_to_template_when_model_unavailable() -> None:
+def test_generate_tmdb_params_falls_back_when_groq_unavailable() -> None:
+    agent = SQLAgent()
+    agent.groq_api_key = ""  # disable Groq
+
+    params, source = asyncio.run(agent.generate_tmdb_params("action movies"))
+
+    assert source == "fallback"
+    assert params.get("keyword") == "action movies"
+
+
+def test_generate_tmdb_params_returns_dict_on_groq_error(monkeypatch) -> None:
     agent = SQLAgent()
 
-    def fail_generate(_: str) -> str:
-        raise RuntimeError("model unavailable")
+    def fail_extract(_: str) -> dict:
+        raise RuntimeError("groq unavailable")
 
-    agent._generate_with_ollama = fail_generate  # type: ignore[method-assign]
+    monkeypatch.setattr(agent, "_extract_tmdb_params_with_groq", fail_extract)
 
-    sql, keyword, source = asyncio.run(agent.generate_sql("What is the average rating by genre?"))
-
-    assert "GROUP BY m.genres" in sql
-    assert keyword == "genre"
-    assert source.startswith("template")
+    params, source = asyncio.run(agent.generate_tmdb_params("horror movies 2020"))
+    assert source == "fallback"
+    assert isinstance(params, dict)
 
 
-def test_generate_sql_uses_semantic_fallback_for_non_rule_prompt() -> None:
+def test_extract_search_keyword_falls_back_without_groq() -> None:
     agent = SQLAgent()
+    agent.groq_api_key = ""  # disable Groq
 
-    def fail_generate(_: str) -> str:
-        raise RuntimeError("model unavailable")
+    keyword = asyncio.run(agent.extract_search_keyword("toys that come to life secretly"))
 
-    agent._generate_with_ollama = fail_generate  # type: ignore[method-assign]
-
-    sql, keyword, source = asyncio.run(
-        agent.generate_sql("Which users rated the highest number of distinct movies?")
-    )
-
-    assert "COUNT(DISTINCT r.movieId)" in sql
-    assert "FROM ratings r" in sql
-    assert source.startswith("template")
-    assert keyword == "number distinct"
-
-
-def test_generate_sql_handles_most_rated_without_title_like_fallback() -> None:
-    agent = SQLAgent()
-
-    def fail_generate(_: str) -> str:
-        raise RuntimeError("model unavailable")
-
-    agent._generate_with_ollama = fail_generate  # type: ignore[method-assign]
-
-    sql, _keyword, _source = asyncio.run(agent.generate_sql("Show the top 20 most-rated movies."))
-
-    assert "COUNT(*) AS rating_count" in sql
-    assert "ORDER BY rating_count DESC" in sql
-    assert "WHERE m.title LIKE" not in sql
+    # fallback: first 5 words
+    assert keyword == "toys that come to life"

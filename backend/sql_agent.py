@@ -188,6 +188,92 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
             body = json.loads(res.read().decode("utf-8"))
         return self._extract_sql_block(body.get("response", ""))
 
+    async def generate_tmdb_params(self, question: str) -> tuple[dict, str]:
+        """Convert natural language question to TMDB discover/search parameters."""
+        if self.groq_api_key:
+            try:
+                params = await asyncio.to_thread(self._extract_tmdb_params_with_groq, question)
+                return params, f"groq:{self.groq_model}"
+            except Exception:
+                pass
+        return {"keyword": question}, "fallback"
+
+    async def extract_search_keyword(self, description: str) -> str:
+        """Extract a concise TMDB-friendly keyword from a natural language movie description."""
+        if self.groq_api_key:
+            try:
+                keyword = await asyncio.to_thread(self._keyword_from_description_with_groq, description)
+                if keyword:
+                    return keyword
+            except Exception:
+                pass
+        # fallback: take first 5 words
+        return " ".join(description.split()[:5])
+
+    def _keyword_from_description_with_groq(self, description: str) -> str:
+        from groq import Groq  # type: ignore[import-untyped]
+
+        client = Groq(api_key=self.groq_api_key)
+        response = client.chat.completions.create(
+            model=self.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "The user describes a movie plot or theme. "
+                        "Your job: return the BEST 1-2 word search term to find this movie on TMDB. "
+                        "Rules:\n"
+                        "- If the description clearly matches a famous movie, return its exact title (e.g. 'Toy Story').\n"
+                        "- Otherwise return 1-2 key nouns from the plot (e.g. 'toys', 'space robot', 'wizard school').\n"
+                        "- NEVER return genre words like 'adventure', 'fantasy', 'drama'.\n"
+                        "- Return ONLY the keyword string, nothing else."
+                    ),
+                },
+                {"role": "user", "content": description},
+            ],
+            temperature=0,
+            max_tokens=20,
+        )
+        return (response.choices[0].message.content or "").strip().strip('"').strip("'")
+
+    def _extract_tmdb_params_with_groq(self, question: str) -> dict:
+        from groq import Groq  # type: ignore[import-untyped]
+
+        client = Groq(api_key=self.groq_api_key)
+        response = client.chat.completions.create(
+            model=self.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract movie search parameters from a natural language question. "
+                        "Return ONLY a valid JSON object with these optional fields:\n"
+                        '- "genre": one of: action, adventure, animation, comedy, crime, '
+                        "documentary, drama, family, fantasy, history, horror, music, mystery, "
+                        "romance, science fiction, thriller, war, western\n"
+                        '- "year": integer (specific release year)\n'
+                        '- "year_gte": integer (released from this year)\n'
+                        '- "year_lte": integer (released up to this year)\n'
+                        '- "min_rating": float 1-10\n'
+                        '- "sort_by": one of: popular, rating, newest, oldest, revenue\n'
+                        '- "keyword": string (movie title or keyword for text search)\n'
+                        "Return ONLY JSON, no explanation."
+                    ),
+                },
+                {"role": "user", "content": question},
+            ],
+            temperature=0,
+            max_tokens=200,
+        )
+        text = response.choices[0].message.content or "{}"
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                pass
+        return {}
+
     async def generate_sql(self, question: str) -> tuple[str, str]:
         # Prefer Groq when API key is configured
         if self.groq_api_key:
