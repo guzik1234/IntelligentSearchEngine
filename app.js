@@ -1,3 +1,124 @@
+// ─── Particle network animation ──────────────────────────────────────────────
+(function () {
+  const canvas = document.getElementById("particleCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const CONFIG = {
+    count: 90,
+    maxDist: 140,       // max distance to draw a line between particles
+    mouseDist: 180,     // mouse influence radius
+    speed: 0.45,
+    dotRadius: 2.2,
+    lineWidth: 1,
+    color: "108,99,255",   // RGB of accent
+    colorAlt: "0,212,255", // RGB of accent-2
+  };
+
+  let W = 0, H = 0;
+  const mouse = { x: -9999, y: -9999 };
+  let particles = [];
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function createParticles() {
+    particles = [];
+    for (let i = 0; i < CONFIG.count; i++) {
+      particles.push({
+        x: rand(0, W),
+        y: rand(0, H),
+        vx: rand(-CONFIG.speed, CONFIG.speed),
+        vy: rand(-CONFIG.speed, CONFIG.speed),
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // update positions
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0 || p.x > W) p.vx *= -1;
+      if (p.y < 0 || p.y > H) p.vy *= -1;
+    }
+
+    // draw lines between particles
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < CONFIG.maxDist) {
+          const alpha = (1 - dist / CONFIG.maxDist) * 0.35;
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(${CONFIG.color},${alpha})`;
+          ctx.lineWidth = CONFIG.lineWidth;
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // draw lines to mouse
+    for (const p of particles) {
+      const dx = p.x - mouse.x;
+      const dy = p.y - mouse.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < CONFIG.mouseDist) {
+        const alpha = (1 - dist / CONFIG.mouseDist) * 0.7;
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${CONFIG.colorAlt},${alpha})`;
+        ctx.lineWidth = CONFIG.lineWidth * 1.4;
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(mouse.x, mouse.y);
+        ctx.stroke();
+      }
+    }
+
+    // draw dots
+    for (const p of particles) {
+      const dx = p.x - mouse.x;
+      const dy = p.y - mouse.y;
+      const near = Math.sqrt(dx * dx + dy * dy) < CONFIG.mouseDist;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, CONFIG.dotRadius, 0, Math.PI * 2);
+      ctx.fillStyle = near
+        ? `rgba(${CONFIG.colorAlt},0.9)`
+        : `rgba(${CONFIG.color},0.7)`;
+      ctx.fill();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener("mousemove", (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+  window.addEventListener("mouseleave", () => {
+    mouse.x = -9999;
+    mouse.y = -9999;
+  });
+
+  window.addEventListener("resize", () => {
+    resize();
+    createParticles();
+  });
+
+  resize();
+  createParticles();
+  draw();
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const sampleQuestions = [];  // kept for semantic tab compat
 
 const el = {
@@ -11,8 +132,7 @@ const el = {
   clear: document.getElementById("clearBtn"),
   loadMore: document.getElementById("loadMoreBtn"),
   status: document.getElementById("statusText"),
-  sqlCards: document.getElementById("sqlCards"),
-  insight: document.getElementById("insightText")
+  sqlCards: document.getElementById("sqlCards")
 };
 
 let sqlCurrentPage = 1;
@@ -59,7 +179,7 @@ function appendMovieCards(movies, container) {
   const tmp = document.createElement("div");
   tmp.innerHTML = movies
     .map(
-      (r) => `<div class="movie-card">
+      (r) => `<div class="movie-card" data-movie-id="${r.movieId}">
         <img
           class="movie-card__poster"
           src="${r.poster_url ? escHtml(r.poster_url) : POSTER_PLACEHOLDER}"
@@ -90,7 +210,7 @@ function renderMovieCards(movies, container) {
   }
   container.innerHTML = movies
     .map(
-      (r) => `<div class="movie-card">
+      (r) => `<div class="movie-card" data-movie-id="${r.movieId}">
         <img
           class="movie-card__poster"
           src="${r.poster_url ? escHtml(r.poster_url) : POSTER_PLACEHOLDER}"
@@ -137,14 +257,12 @@ async function runQuery(page = 1) {
     } else {
       appendMovieCards(out.movies || [], el.sqlCards);
     }
-    el.insight.textContent = out.insight;
     el.status.textContent = `Done · ${filterSummary(params)}`;
     el.clear.hidden = false;
     el.loadMore.hidden = !out.has_more;
     sqlCurrentPage = out.page;
   } catch (e) {
     if (page === 1) renderMovieCards([], el.sqlCards);
-    el.insight.textContent = `Error: ${e.message}`;
     el.status.textContent = `Error: ${e.message}`;
     el.clear.hidden = false;
   } finally {
@@ -163,7 +281,6 @@ el.clear.addEventListener("click", () => {
   el.ratingValue.textContent = "any";
   el.sort.value = "popular";
   el.sqlCards.innerHTML = "";
-  el.insight.textContent = "Insight will appear here.";
   el.status.textContent = "Ready";
   el.clear.hidden = true;
   el.loadMore.hidden = true;
@@ -179,7 +296,6 @@ const semEl = {
   clear: document.getElementById("semanticClearBtn"),
   loadMore: document.getElementById("semanticLoadMoreBtn"),
   status: document.getElementById("semanticStatus"),
-  statusInline: document.getElementById("semanticStatusInline"),
   cards: document.getElementById("semanticCards")
 };
 
@@ -225,7 +341,6 @@ async function runSemanticSearch(page = 1) {
       appendMovieCards(out.results, semEl.cards);
     }
     semEl.status.textContent = `Found ${out.total} movies`;
-    semEl.statusInline.textContent = `Found ${out.total} movies`;
     semEl.clear.hidden = false;
     semEl.loadMore.hidden = !out.has_more;
     semCurrentPage = out.page;
@@ -237,12 +352,25 @@ async function runSemanticSearch(page = 1) {
 }
 
 semEl.btn.addEventListener("click", () => runSemanticSearch(1));
+
+// auto-resize textarea
+semEl.input.addEventListener("input", () => {
+  semEl.input.style.height = "auto";
+  semEl.input.style.height = semEl.input.scrollHeight + "px";
+});
+
+// Enter submits, Shift+Enter adds newline
+semEl.input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    runSemanticSearch(1);
+  }
+});
 semEl.loadMore.addEventListener("click", () => runSemanticSearch(semCurrentPage + 1));
 semEl.clear.addEventListener("click", () => {
   semEl.input.value = "";
   semEl.cards.innerHTML = "";
   semEl.status.textContent = "Ready";
-  semEl.statusInline.textContent = "";
   semEl.clear.hidden = true;
   semEl.loadMore.hidden = true;
   semCurrentPage = 1;
@@ -269,3 +397,70 @@ function switchTab(name) {
 
 document.getElementById("tabSql").addEventListener("click", () => switchTab("sql"));
 document.getElementById("tabSemantic").addEventListener("click", () => switchTab("semantic"));
+
+// ─── Movie detail modal ───────────────────────────────────────────────────────
+
+const movieModal = document.getElementById("movieModal");
+const movieModalInner = movieModal.querySelector(".modal__inner");
+const movieModalClose = document.getElementById("modalClose");
+
+function openMovieModal(movieId) {
+  movieModalInner.innerHTML = `<p class="modal__loading">Loading…</p>`;
+  movieModal.hidden = false;
+  document.body.style.overflow = "hidden";
+
+  fetch(`/api/movies/${encodeURIComponent(movieId)}`)
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((d) => {
+      const poster = d.poster_url || POSTER_PLACEHOLDER;
+      const year = d.release_date ? `${d.release_date}` : "";
+      const runtime = d.runtime ? `${d.runtime} min` : "";
+      const rating = d.tmdb_rating ? `★ ${d.tmdb_rating.toFixed(1)}` : "";
+      const genres = (d.genres || "").replace(/\|/g, " · ");
+      const chips = [year, genres, runtime, rating]
+        .filter(Boolean)
+        .map((c) => `<span class="modal__meta-chip">${escHtml(c)}</span>`)
+        .join("");
+      const tagline = d.plot ? `<p class="modal__tagline">${escHtml(d.plot)}</p>` : "";
+      const desc = d.description
+        ? `<p class="modal__desc">${escHtml(d.description)}</p>`
+        : "";
+      const tmdbLink = d.tmdbId
+        ? `<a class="modal__link modal__link--tmdb" href="https://www.themoviedb.org/movie/${encodeURIComponent(d.tmdbId)}" target="_blank" rel="noopener noreferrer">TMDB</a>`
+        : "";
+      const imdbLink = d.imdbId
+        ? `<a class="modal__link modal__link--imdb" href="https://www.imdb.com/title/${encodeURIComponent(d.imdbId)}" target="_blank" rel="noopener noreferrer">IMDb</a>`
+        : "";
+      movieModalInner.innerHTML = `
+        <img class="modal__poster" src="${escHtml(poster)}" alt="${escHtml(d.title)}" onerror="this.src='${POSTER_PLACEHOLDER}'" />
+        <div class="modal__details">
+          <h2 id="modalTitle" class="modal__title">${escHtml(d.title)}</h2>
+          <p class="modal__meta">${chips}</p>
+          ${tagline}
+          ${desc}
+          <div class="modal__links">${tmdbLink}${imdbLink}</div>
+        </div>`;
+    })
+    .catch(() => {
+      movieModalInner.innerHTML = `<p class="modal__loading">Could not load movie details.</p>`;
+    });
+}
+
+function closeMovieModal() {
+  movieModal.hidden = true;
+  document.body.style.overflow = "";
+}
+
+movieModalClose.addEventListener("click", closeMovieModal);
+movieModal.addEventListener("click", (e) => {
+  if (e.target === movieModal) closeMovieModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !movieModal.hidden) closeMovieModal();
+});
+
+document.addEventListener("click", (e) => {
+  const card = e.target.closest(".movie-card[data-movie-id]");
+  if (!card) return;
+  openMovieModal(card.dataset.movieId);
+});
