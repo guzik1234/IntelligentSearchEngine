@@ -144,6 +144,8 @@ body {
   padding: 0.5rem 0.5rem 0.5rem 1.3rem;
   box-shadow: var(--shadow-md);
   transition: border-color 220ms, box-shadow 220ms;
+  position: relative;
+  overflow: visible;
 }
 
 .searchbox:focus-within {
@@ -163,31 +165,79 @@ body {
   position: relative;
 }
 
-.searchbox__genre-wrap::after {
-  content: "";
-  position: absolute;
-  right: 0.4rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 0; height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid var(--muted);
-  pointer-events: none;
+/* ─── Custom genre dropdown ──────────────────────────────────────────────── */
+.custom-select {
+  position: static;
+  width: 100%;
 }
 
-.searchbox__genre-wrap select {
+.custom-select__trigger {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   border: none;
   background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 1rem;
-  outline: none;
   cursor: pointer;
-  padding: 0.4rem 1.4rem 0.4rem 0;
-  appearance: none;
-  -webkit-appearance: none;
+  padding: 0.4rem 0.4rem 0.4rem 0;
+  text-align: left;
+}
+
+.custom-select__arrow {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--muted);
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 0.4rem;
+  transition: transform 180ms;
+}
+
+.custom-select.open .custom-select__arrow {
+  transform: rotate(180deg);
+}
+
+.custom-select__list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0;
+  background: var(--bg-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.custom-select.open .custom-select__list {
+  display: block;
+}
+
+.custom-select__list li {
+  padding: 0.5rem 1.1rem;
+  font-size: 0.93rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+
+.custom-select__list li:hover {
+  background: rgba(108,99,255,.18);
+  color: #fff;
+}
+
+.custom-select__list li.selected {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .searchbox__btn {

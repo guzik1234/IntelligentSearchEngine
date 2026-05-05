@@ -37,27 +37,33 @@
           <div class="searchbox">
             <span class="searchbox__icon">🎬</span>
             <div class="searchbox__genre-wrap">
-              <select id="filterGenre">
-                <option value="">Any genre</option>
-                <option value="action">Action</option>
-                <option value="adventure">Adventure</option>
-                <option value="animation">Animation</option>
-                <option value="comedy">Comedy</option>
-                <option value="crime">Crime</option>
-                <option value="documentary">Documentary</option>
-                <option value="drama">Drama</option>
-                <option value="family">Family</option>
-                <option value="fantasy">Fantasy</option>
-                <option value="history">History</option>
-                <option value="horror">Horror</option>
-                <option value="music">Music</option>
-                <option value="mystery">Mystery</option>
-                <option value="romance">Romance</option>
-                <option value="science fiction">Sci-Fi</option>
-                <option value="thriller">Thriller</option>
-                <option value="war">War</option>
-                <option value="western">Western</option>
-              </select>
+              <div class="custom-select" id="filterGenre" data-value="">
+                <button class="custom-select__trigger" type="button">
+                  <span class="custom-select__label">Any genre</span>
+                  <span class="custom-select__arrow"></span>
+                </button>
+                <ul class="custom-select__list">
+                  <li data-value="">Any genre</li>
+                  <li data-value="action">Action</li>
+                  <li data-value="adventure">Adventure</li>
+                  <li data-value="animation">Animation</li>
+                  <li data-value="comedy">Comedy</li>
+                  <li data-value="crime">Crime</li>
+                  <li data-value="documentary">Documentary</li>
+                  <li data-value="drama">Drama</li>
+                  <li data-value="family">Family</li>
+                  <li data-value="fantasy">Fantasy</li>
+                  <li data-value="history">History</li>
+                  <li data-value="horror">Horror</li>
+                  <li data-value="music">Music</li>
+                  <li data-value="mystery">Mystery</li>
+                  <li data-value="romance">Romance</li>
+                  <li data-value="science fiction">Sci-Fi</li>
+                  <li data-value="thriller">Thriller</li>
+                  <li data-value="war">War</li>
+                  <li data-value="western">Western</li>
+                </ul>
+              </div>
             </div>
             <button id="runBtn" class="searchbox__btn" type="button">Search</button>
           </div>

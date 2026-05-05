@@ -121,8 +121,34 @@
 
 const sampleQuestions = [];  // kept for semantic tab compat
 
+const genreEl = document.getElementById("filterGenre");
+
+// Custom select logic
+(function () {
+  const trigger = genreEl.querySelector(".custom-select__trigger");
+  const list = genreEl.querySelector(".custom-select__list");
+  const label = genreEl.querySelector(".custom-select__label");
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    genreEl.classList.toggle("open");
+  });
+
+  list.addEventListener("click", (e) => {
+    const li = e.target.closest("li");
+    if (!li) return;
+    genreEl.dataset.value = li.dataset.value;
+    label.textContent = li.textContent;
+    list.querySelectorAll("li").forEach(el => el.classList.remove("selected"));
+    li.classList.add("selected");
+    genreEl.classList.remove("open");
+  });
+
+  document.addEventListener("click", () => genreEl.classList.remove("open"));
+})();
+
 const el = {
-  genre: document.getElementById("filterGenre"),
+  genre: genreEl,
   yearFrom: document.getElementById("filterYearFrom"),
   yearTo: document.getElementById("filterYearTo"),
   rating: document.getElementById("filterRating"),
@@ -148,7 +174,7 @@ el.rating.addEventListener("input", () => {
 
 function readFilters() {
   const params = {};
-  if (el.genre.value) params.genre = el.genre.value;
+  if (el.genre.dataset.value) params.genre = el.genre.dataset.value;
   const yFrom = parseInt(el.yearFrom.value);
   const yTo   = parseInt(el.yearTo.value);
   if (!isNaN(yFrom) && yFrom >= 1900 && yFrom <= 2030) params.year_gte = yFrom;
@@ -273,7 +299,9 @@ async function runQuery(page = 1) {
 el.run.addEventListener("click", () => runQuery(1));
 el.loadMore.addEventListener("click", () => runQuery(sqlCurrentPage + 1));
 el.clear.addEventListener("click", () => {
-  el.genre.value = "";
+  el.genre.dataset.value = "";
+  el.genre.querySelector(".custom-select__label").textContent = "Any genre";
+  el.genre.querySelectorAll("li").forEach(li => li.classList.remove("selected"));
   el.yearFrom.value = "";
   el.yearTo.value = "";
   el.rating.value = 0;
