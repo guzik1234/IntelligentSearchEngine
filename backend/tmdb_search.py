@@ -2,7 +2,7 @@ import json
 import os
 from typing import Any
 from urllib import request as urllib_request
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote as url_quote
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
@@ -129,6 +129,113 @@ def discover_movies(params: dict[str, Any], page: int = 1) -> list[dict[str, Any
     return [_format_movie(m) for m in data.get("results", [])[:20]]
 
 
+JUSTWATCH_GQL = "https://apis.justwatch.com/graphql"
+
+_JW_QUERY = """
+query ($query: String!, $country: Country!, $language: Language!) {
+  popularTitles(
+    country: $country
+    first: 10
+    filter: { searchQuery: $query, objectTypes: [MOVIE] }
+  ) {
+    edges {
+      node {
+        ... on Movie {
+          content(country: $country, language: $language) {
+            externalIds { tmdbId }
+          }
+          offers(country: $country, platform: WEB) {
+            standardWebURL
+            monetizationType
+            package { packageId clearName }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _justwatch_offers(tmdb_id: int, title: str) -> dict[int, str]:
+    """Return {jw_package_id: direct_url} from JustWatch GraphQL, matched by TMDB ID."""
+    if not title:
+        return {}
+    body = json.dumps({
+        "query": _JW_QUERY,
+        "variables": {"query": title, "country": "PL", "language": "pl"},
+    }).encode()
+    req = urllib_request.Request(
+        JUSTWATCH_GQL,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=8) as res:
+            data = json.loads(res.read())
+    except Exception:
+        return {}
+
+    tmdb_str = str(tmdb_id)
+    edges = (data.get("data") or {}).get("popularTitles", {}).get("edges", [])
+    for edge in edges:
+        node = edge.get("node", {})
+        ext = (node.get("content") or {}).get("externalIds") or {}
+        if str(ext.get("tmdbId", "")) != tmdb_str:
+            continue
+        result: dict[int, str] = {}
+        seen_pkg: set[int] = set()
+        for offer in node.get("offers", []):
+            pkg = offer.get("package") or {}
+            pkg_id = pkg.get("packageId")
+            url = offer.get("standardWebURL", "")
+            if pkg_id and url and pkg_id not in seen_pkg:
+                seen_pkg.add(pkg_id)
+                result[pkg_id] = url
+        return result
+    return {}
+
+
+def get_watch_providers(tmdb_id: int, title: str = "") -> list[dict]:
+    """Fetch streaming providers with direct links. Uses TMDB for logos/names, JustWatch for URLs."""
+    tmdb_data = _tmdb_get(f"movie/{tmdb_id}/watch/providers", {})
+    if not tmdb_data:
+        return []
+    results = tmdb_data.get("results", {})
+    region_key = "PL" if "PL" in results else ("US" if "US" in results else None)
+    if not region_key:
+        return []
+    region_data = results[region_key]
+    fallback_url = f"https://www.themoviedb.org/movie/{tmdb_id}/watch?locale={region_key}"
+
+    # JustWatch package IDs match TMDB provider_id for most platforms
+    jw_urls = _justwatch_offers(tmdb_id, title)
+
+    providers: list[dict] = []
+    seen: set[int] = set()
+    for ptype in ("flatrate", "rent", "buy"):
+        for p in region_data.get(ptype, []):
+            pid = p.get("provider_id")
+            if pid in seen:
+                continue
+            seen.add(pid)
+            logo = f"https://image.tmdb.org/t/p/w45{p['logo_path']}" if p.get("logo_path") else None
+            # JustWatch packageId == TMDB provider_id for the same platforms
+            url = jw_urls.get(pid) or fallback_url
+            providers.append({
+                "provider_name": p.get("provider_name", ""),
+                "logo_url": logo,
+                "type": ptype,
+                "url": url,
+            })
+    return providers
+
+
 def get_movie_detail(tmdb_id: int) -> dict[str, Any] | None:
     """Fetch full movie details from TMDB by TMDB movie ID."""
     data = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US"})
@@ -149,4 +256,6 @@ def get_movie_detail(tmdb_id: int) -> dict[str, Any] | None:
         "tmdb_rating": data.get("vote_average"),
         "release_date": release,
         "runtime": data.get("runtime"),
+        "watch_providers": get_watch_providers(tmdb_id, data.get("title", "")),
+
     }

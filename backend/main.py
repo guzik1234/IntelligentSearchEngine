@@ -80,6 +80,7 @@ class MovieDetailResponse(BaseModel):
     tmdb_rating: float | None = None
     release_date: str | None = None
     runtime: int | None = None
+    watch_providers: list[dict] | None = None
 
 
 # --- App setup ---

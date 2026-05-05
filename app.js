@@ -459,6 +459,18 @@ function openMovieModal(movieId) {
       const imdbLink = d.imdbId
         ? `<a class="modal__link modal__link--imdb" href="https://www.imdb.com/title/${encodeURIComponent(d.imdbId)}" target="_blank" rel="noopener noreferrer">IMDb</a>`
         : "";
+      const providersHtml = (() => {
+        const list = d.watch_providers;
+        if (!list || list.length === 0) return "";
+        const items = list
+          .map((p) =>
+            p.logo_url
+              ? `<a class="modal__provider" href="${escHtml(p.url || "#")}" target="_blank" rel="noopener noreferrer" title="${escHtml(p.provider_name)}"><img src="${escHtml(p.logo_url)}" alt="${escHtml(p.provider_name)}" /></a>`
+              : `<a class="modal__provider modal__provider--text" href="${escHtml(p.url || "#")}" target="_blank" rel="noopener noreferrer">${escHtml(p.provider_name)}</a>`
+          )
+          .join("");
+        return `<div class="modal__providers"><span class="modal__providers-label">Gdzie obejrzeć</span><div class="modal__providers-list">${items}</div></div>`;
+      })();
       movieModalInner.innerHTML = `
         <img class="modal__poster" src="${escHtml(poster)}" alt="${escHtml(d.title)}" onerror="this.src='${POSTER_PLACEHOLDER}'" />
         <div class="modal__details">
@@ -466,6 +478,7 @@ function openMovieModal(movieId) {
           <p class="modal__meta">${chips}</p>
           ${tagline}
           ${desc}
+          ${providersHtml}
           <div class="modal__links">${tmdbLink}${imdbLink}</div>
         </div>`;
     })
