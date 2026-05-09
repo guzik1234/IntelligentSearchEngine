@@ -37,6 +37,38 @@ GENRE_ID_TO_NAME: dict[int, str] = {
     53: "Thriller", 10752: "War", 37: "Western",
 }
 
+# TV-specific genre mappings (TMDB uses different IDs for TV)
+TV_GENRE_NAME_TO_ID: dict[str, int] = {
+    "action": 10759,
+    "adventure": 10759,
+    "action & adventure": 10759,
+    "animation": 16,
+    "comedy": 35,
+    "crime": 80,
+    "documentary": 99,
+    "drama": 18,
+    "family": 10751,
+    "fantasy": 10765,
+    "kids": 10762,
+    "mystery": 9648,
+    "reality": 10764,
+    "romance": 10749,
+    "science fiction": 10765,
+    "sci-fi": 10765,
+    "sci-fi & fantasy": 10765,
+    "thriller": 9648,
+    "war": 10768,
+    "western": 37,
+}
+
+TV_GENRE_ID_TO_NAME: dict[int, str] = {
+    10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
+    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
+    10762: "Kids", 9648: "Mystery", 10764: "Reality",
+    10749: "Romance", 10765: "Sci-Fi & Fantasy", 10766: "Soap",
+    10768: "War & Politics", 37: "Western",
+}
+
 SORT_MAP: dict[str, str] = {
     "popular": "popularity.desc",
     "popularity": "popularity.desc",
@@ -129,9 +161,111 @@ def discover_movies(params: dict[str, Any], page: int = 1) -> list[dict[str, Any
     return [_format_movie(m) for m in data.get("results", [])[:20]]
 
 
+def _format_tv(m: dict[str, Any]) -> dict[str, Any]:
+    genre_ids: list[int] = m.get("genre_ids", [])
+    genres_str = " | ".join(TV_GENRE_ID_TO_NAME.get(gid, str(gid)) for gid in genre_ids)
+    release = (m.get("first_air_date") or "")[:4] or None
+    poster = f"{TMDB_IMAGE_BASE}{m['poster_path']}" if m.get("poster_path") else None
+    return {
+        "movieId": m.get("id", 0),
+        "title": m.get("name", ""),
+        "genres": genres_str,
+        "description": m.get("overview") or None,
+        "poster_url": poster,
+        "release_date": release,
+        "tmdb_rating": m.get("vote_average"),
+        "score": None,
+        "media_type": "tv",
+    }
+
+
+def search_tv(query: str, page: int = 1) -> list[dict[str, Any]]:
+    """Full-text search via TMDB /search/tv."""
+    data = _tmdb_get("search/tv", {
+        "query": query,
+        "page": page,
+        "include_adult": "false",
+        "language": "en-US",
+    })
+    if not data:
+        return []
+    return [_format_tv(m) for m in data.get("results", [])]
+
+
+def discover_tv(params: dict[str, Any], page: int = 1) -> list[dict[str, Any]]:
+    """Discover TV series using structured filters via TMDB /discover/tv."""
+    q: dict[str, Any] = {
+        "language": "en-US",
+        "include_adult": "false",
+        "page": page,
+    }
+
+    genre = str(params.get("genre", "")).strip().lower()
+    if genre:
+        genre_id = TV_GENRE_NAME_TO_ID.get(genre)
+        if genre_id:
+            q["with_genres"] = str(genre_id)
+
+    if params.get("year"):
+        q["first_air_date_year"] = str(params["year"])
+    if params.get("year_gte"):
+        q["first_air_date.gte"] = f"{params['year_gte']}-01-01"
+    if params.get("year_lte"):
+        q["first_air_date.lte"] = f"{params['year_lte']}-12-31"
+
+    if params.get("min_rating"):
+        q["vote_average.gte"] = str(params["min_rating"])
+        q["vote_count.gte"] = "50"
+
+    tv_sort_map = {
+        "popular": "popularity.desc",
+        "popularity": "popularity.desc",
+        "rating": "vote_average.desc",
+        "newest": "first_air_date.desc",
+        "oldest": "first_air_date.asc",
+        "revenue": "popularity.desc",  # no revenue for TV, fallback to popularity
+    }
+    sort = str(params.get("sort_by", "popular")).lower()
+    q["sort_by"] = tv_sort_map.get(sort, "popularity.desc")
+
+    data = _tmdb_get("discover/tv", q)
+    if not data:
+        return []
+    return [_format_tv(m) for m in data.get("results", [])[:20]]
+
+
+def get_tv_detail(tmdb_id: int) -> dict[str, Any] | None:
+    """Fetch full TV series details from TMDB by TMDB TV ID."""
+    data = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US"})
+    if not data:
+        return None
+    genre_names = " | ".join(g["name"] for g in data.get("genres", []))
+    poster = f"{TMDB_IMAGE_BASE}{data['poster_path']}" if data.get("poster_path") else None
+    release = (data.get("first_air_date") or "")[:4] or None
+    runtimes: list[int] = data.get("episode_run_time", [])
+    runtime = runtimes[0] if runtimes else None
+    ext_ids = _tmdb_get(f"tv/{tmdb_id}/external_ids", {}) or {}
+    providers = get_watch_providers(tmdb_id, data.get("name", ""), media_type="tv")
+    return {
+        "movieId": data.get("id", 0),
+        "title": data.get("name", ""),
+        "genres": genre_names,
+        "description": data.get("overview") or None,
+        "plot": data.get("tagline") or None,
+        "poster_url": poster,
+        "tmdbId": str(data.get("id", "")),
+        "imdbId": ext_ids.get("imdb_id"),
+        "tmdb_rating": data.get("vote_average"),
+        "release_date": release,
+        "runtime": runtime,
+        "watch_providers": providers,
+        "media_type": "tv",
+    }
+
+
 JUSTWATCH_GQL = "https://apis.justwatch.com/graphql"
 
-_JW_QUERY = """
+_JW_QUERY_MOVIE = """
 query ($query: String!, $country: Country!, $language: Language!) {
   popularTitles(
     country: $country
@@ -156,13 +290,39 @@ query ($query: String!, $country: Country!, $language: Language!) {
 }
 """
 
+_JW_QUERY_TV = """
+query ($query: String!, $country: Country!, $language: Language!) {
+  popularTitles(
+    country: $country
+    first: 10
+    filter: { searchQuery: $query, objectTypes: [SHOW] }
+  ) {
+    edges {
+      node {
+        ... on Show {
+          content(country: $country, language: $language) {
+            externalIds { tmdbId }
+          }
+          offers(country: $country, platform: WEB) {
+            standardWebURL
+            monetizationType
+            package { packageId clearName }
+          }
+        }
+      }
+    }
+  }
+}
+"""
 
-def _justwatch_offers(tmdb_id: int, title: str) -> dict[int, str]:
+
+def _justwatch_offers(tmdb_id: int, title: str, media_type: str = "movie") -> dict[int, str]:
     """Return {jw_package_id: direct_url} from JustWatch GraphQL, matched by TMDB ID."""
     if not title:
         return {}
+    jw_query = _JW_QUERY_TV if media_type == "tv" else _JW_QUERY_MOVIE
     body = json.dumps({
-        "query": _JW_QUERY,
+        "query": jw_query,
         "variables": {"query": title, "country": "PL", "language": "pl"},
     }).encode()
     req = urllib_request.Request(
@@ -201,9 +361,10 @@ def _justwatch_offers(tmdb_id: int, title: str) -> dict[int, str]:
     return {}
 
 
-def get_watch_providers(tmdb_id: int, title: str = "") -> list[dict]:
+def get_watch_providers(tmdb_id: int, title: str = "", media_type: str = "movie") -> list[dict]:
     """Fetch streaming providers with direct links. Uses TMDB for logos/names, JustWatch for URLs."""
-    tmdb_data = _tmdb_get(f"movie/{tmdb_id}/watch/providers", {})
+    tmdb_path = f"{media_type}/{tmdb_id}/watch/providers"
+    tmdb_data = _tmdb_get(tmdb_path, {})
     if not tmdb_data:
         return []
     results = tmdb_data.get("results", {})
@@ -211,10 +372,11 @@ def get_watch_providers(tmdb_id: int, title: str = "") -> list[dict]:
     if not region_key:
         return []
     region_data = results[region_key]
-    fallback_url = f"https://www.themoviedb.org/movie/{tmdb_id}/watch?locale={region_key}"
+    tmdb_watch_path = "tv" if media_type == "tv" else "movie"
+    fallback_url = f"https://www.themoviedb.org/{tmdb_watch_path}/{tmdb_id}/watch?locale={region_key}"
 
     # JustWatch package IDs match TMDB provider_id for most platforms
-    jw_urls = _justwatch_offers(tmdb_id, title)
+    jw_urls = _justwatch_offers(tmdb_id, title, media_type)
 
     providers: list[dict] = []
     seen: set[int] = set()
@@ -257,5 +419,4 @@ def get_movie_detail(tmdb_id: int) -> dict[str, Any] | None:
         "release_date": release,
         "runtime": data.get("runtime"),
         "watch_providers": get_watch_providers(tmdb_id, data.get("title", "")),
-
     }

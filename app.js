@@ -161,6 +161,26 @@ const el = {
   sqlCards: document.getElementById("sqlCards")
 };
 
+// ─── Media type toggles ───────────────────────────────────────────────────────
+
+let activeMediaType = "movie";
+let semActiveMediaType = "movie";
+
+function initMediaToggle(containerId, onChange) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest(".media-type-toggle__btn");
+    if (!btn) return;
+    container.querySelectorAll(".media-type-toggle__btn").forEach(b => b.classList.remove("media-type-toggle__btn--active"));
+    btn.classList.add("media-type-toggle__btn--active");
+    onChange(btn.dataset.type);
+  });
+}
+
+initMediaToggle("mediaTypeToggle", (type) => { activeMediaType = type; });
+initMediaToggle("semMediaTypeToggle", (type) => { semActiveMediaType = type; });
+
 let sqlCurrentPage = 1;
 let sqlLastParams = {};
 
@@ -205,7 +225,7 @@ function appendMovieCards(movies, container) {
   const tmp = document.createElement("div");
   tmp.innerHTML = movies
     .map(
-      (r) => `<div class="movie-card" data-movie-id="${r.movieId}">
+      (r) => `<div class="movie-card" data-movie-id="${r.movieId}" data-media-type="${r.media_type || 'movie'}">
         <img
           class="movie-card__poster"
           src="${r.poster_url ? escHtml(r.poster_url) : POSTER_PLACEHOLDER}"
@@ -215,6 +235,8 @@ function appendMovieCards(movies, container) {
         />
         <div class="movie-card__body">
           <p class="movie-card__title">${escHtml(r.title)}${
+            r.media_type === "tv" ? `<span class="movie-card__type-badge">TV</span>` : ""
+          }${
             r.release_date ? ` <span class="movie-card__year">(${escHtml(r.release_date)})</span>` : ""
           }</p>
           <p class="movie-card__genres">${escHtml((r.genres || "").replace(/\|/g, " \u00b7 "))}</p>
@@ -236,7 +258,7 @@ function renderMovieCards(movies, container) {
   }
   container.innerHTML = movies
     .map(
-      (r) => `<div class="movie-card" data-movie-id="${r.movieId}">
+      (r) => `<div class="movie-card" data-movie-id="${r.movieId}" data-media-type="${r.media_type || 'movie'}">
         <img
           class="movie-card__poster"
           src="${r.poster_url ? escHtml(r.poster_url) : POSTER_PLACEHOLDER}"
@@ -246,6 +268,8 @@ function renderMovieCards(movies, container) {
         />
         <div class="movie-card__body">
           <p class="movie-card__title">${escHtml(r.title)}${
+            r.media_type === "tv" ? `<span class="movie-card__type-badge">TV</span>` : ""
+          }${
             r.release_date ? ` <span class="movie-card__year">(${escHtml(r.release_date)})</span>` : ""
           }</p>
           <p class="movie-card__genres">${escHtml((r.genres || "").replace(/\|/g, " \u00b7 "))}</p>
@@ -260,6 +284,7 @@ function renderMovieCards(movies, container) {
 async function runQuery(page = 1) {
   const params = page === 1 ? readFilters() : sqlLastParams;
   sqlLastParams = params;
+  const mediaType = activeMediaType;
 
   el.run.disabled = true;
   el.loadMore.hidden = true;
@@ -269,7 +294,7 @@ async function runQuery(page = 1) {
     const res = await fetch("/api/filter", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ params, page })
+      body: JSON.stringify({ params, page, media_type: mediaType })
     });
 
     if (!res.ok) {
@@ -347,6 +372,7 @@ async function runSemanticSearch(page = 1) {
   if (!query) return (semEl.status.textContent = "Enter a description first.");
 
   semLastQuery = query;
+  const mediaType = semActiveMediaType;
   semEl.btn.disabled = true;
   semEl.loadMore.hidden = true;
   semEl.status.textContent = page === 1 ? "Searching TMDB\u2026" : "Loading more...";
@@ -355,7 +381,7 @@ async function runSemanticSearch(page = 1) {
     const res = await fetch("/api/semantic-search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, top_k: 10, page })
+      body: JSON.stringify({ query, top_k: 10, page, media_type: mediaType })
     });
 
     if (!res.ok) {
@@ -432,12 +458,19 @@ const movieModal = document.getElementById("movieModal");
 const movieModalInner = movieModal.querySelector(".modal__inner");
 const movieModalClose = document.getElementById("modalClose");
 
-function openMovieModal(movieId) {
+function openMovieModal(movieId, mediaType) {
   movieModalInner.innerHTML = `<p class="modal__loading">Loading…</p>`;
   movieModal.hidden = false;
   document.body.style.overflow = "hidden";
 
-  fetch(`/api/movies/${encodeURIComponent(movieId)}`)
+  const apiPath = mediaType === "tv"
+    ? `/api/tv/${encodeURIComponent(movieId)}`
+    : `/api/movies/${encodeURIComponent(movieId)}`;
+  const tmdbBaseUrl = mediaType === "tv"
+    ? "https://www.themoviedb.org/tv/"
+    : "https://www.themoviedb.org/movie/";
+
+  fetch(apiPath)
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((d) => {
       const poster = d.poster_url || POSTER_PLACEHOLDER;
@@ -454,7 +487,7 @@ function openMovieModal(movieId) {
         ? `<p class="modal__desc">${escHtml(d.description)}</p>`
         : "";
       const tmdbLink = d.tmdbId
-        ? `<a class="modal__link modal__link--tmdb" href="https://www.themoviedb.org/movie/${encodeURIComponent(d.tmdbId)}" target="_blank" rel="noopener noreferrer">TMDB</a>`
+        ? `<a class="modal__link modal__link--tmdb" href="${tmdbBaseUrl}${encodeURIComponent(d.tmdbId)}" target="_blank" rel="noopener noreferrer">TMDB</a>`
         : "";
       const imdbLink = d.imdbId
         ? `<a class="modal__link modal__link--imdb" href="https://www.imdb.com/title/${encodeURIComponent(d.imdbId)}" target="_blank" rel="noopener noreferrer">IMDb</a>`
@@ -483,7 +516,7 @@ function openMovieModal(movieId) {
         </div>`;
     })
     .catch(() => {
-      movieModalInner.innerHTML = `<p class="modal__loading">Could not load movie details.</p>`;
+      movieModalInner.innerHTML = `<p class="modal__loading">Could not load details.</p>`;
     });
 }
 
@@ -503,5 +536,5 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   const card = e.target.closest(".movie-card[data-movie-id]");
   if (!card) return;
-  openMovieModal(card.dataset.movieId);
+  openMovieModal(card.dataset.movieId, card.dataset.mediaType || "movie");
 });

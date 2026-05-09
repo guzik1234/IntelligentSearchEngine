@@ -949,3 +949,50 @@ pre {
   from { transform: translate(0,0) rotate(0deg);         }
   to   { transform: translate(28px,-24px) rotate(-8deg); }
 }
+
+/* ── Media type toggle (Movies / Series) ───────────────────────────────────── */
+.media-type-toggle {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+
+.media-type-toggle__btn {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.media-type-toggle__btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.media-type-toggle__btn--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* TV badge on cards */
+.movie-card__type-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent-2);
+  color: #fff;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  letter-spacing: 0.03em;
+}

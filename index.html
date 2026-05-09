@@ -36,6 +36,10 @@
           <!-- Main search bar -->
           <div class="searchbox">
             <span class="searchbox__icon">🎬</span>
+            <div class="media-type-toggle" id="mediaTypeToggle" role="group" aria-label="Content type">
+              <button class="media-type-toggle__btn media-type-toggle__btn--active" data-type="movie" type="button">🎬 Movies</button>
+              <button class="media-type-toggle__btn" data-type="tv" type="button">📺 Series</button>
+            </div>
             <div class="searchbox__genre-wrap">
               <div class="custom-select" id="filterGenre" data-value="">
                 <button class="custom-select__trigger" type="button">
@@ -119,6 +123,10 @@
 
         <div class="searchbox-wrap">
           <div class="searchbox searchbox--semantic">
+            <div class="media-type-toggle" id="semMediaTypeToggle" role="group" aria-label="Content type">
+              <button class="media-type-toggle__btn media-type-toggle__btn--active" data-type="movie" type="button">🎬 Movies</button>
+              <button class="media-type-toggle__btn" data-type="tv" type="button">📺 Series</button>
+            </div>
             <textarea
               id="semanticInput"
               rows="1"

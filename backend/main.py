@@ -27,11 +27,13 @@ ASSET_FILES = {"app.js", "styles.css"}
 class SearchRequest(BaseModel):
     question: str = Field(min_length=3, max_length=300)
     page: int = Field(default=1, ge=1, le=20)
+    media_type: str = Field(default="movie", pattern="^(movie|tv)$")
 
 
 class FilterRequest(BaseModel):
     params: dict = Field(default_factory=dict)
     page: int = Field(default=1, ge=1, le=20)
+    media_type: str = Field(default="movie", pattern="^(movie|tv)$")
 
 
 class MovieCard(BaseModel):
@@ -43,6 +45,7 @@ class MovieCard(BaseModel):
     release_date: str | None = None
     tmdb_rating: float | None = None
     score: float | None = None
+    media_type: str = "movie"
 
 
 class SearchResponse(BaseModel):
@@ -58,6 +61,7 @@ class SemanticSearchRequest(BaseModel):
     query: str = Field(min_length=3, max_length=500)
     top_k: int = Field(default=20, ge=1, le=50)
     page: int = Field(default=1, ge=1, le=20)
+    media_type: str = Field(default="movie", pattern="^(movie|tv)$")
 
 
 class SemanticSearchResponse(BaseModel):
@@ -81,6 +85,7 @@ class MovieDetailResponse(BaseModel):
     release_date: str | None = None
     runtime: int | None = None
     watch_providers: list[dict] | None = None
+    media_type: str = "movie"
 
 
 # --- App setup ---
@@ -131,23 +136,27 @@ def health() -> dict[str, str]:
 async def filter_movies(request: FilterRequest) -> SearchResponse:
     """Direct TMDB discover — no LLM, params come straight from the UI."""
     try:
-        movies = await asyncio.to_thread(tmdb_search.discover_movies, request.params, request.page)
+        if request.media_type == "tv":
+            items = await asyncio.to_thread(tmdb_search.discover_tv, request.params, request.page)
+        else:
+            items = await asyncio.to_thread(tmdb_search.discover_movies, request.params, request.page)
     except Exception as exc:
         log.error("TMDB filter failed: %s", exc)
         raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
 
+    label = "series" if request.media_type == "tv" else "movies"
     insight = (
-        f"Found {len(movies)} movies matching your filters."
-        if movies
-        else "No movies found. Try adjusting the filters."
+        f"Found {len(items)} {label} matching your filters."
+        if items
+        else f"No {label} found. Try adjusting the filters."
     )
     return SearchResponse(
-        movies=[MovieCard(**m) for m in movies],
+        movies=[MovieCard(**m) for m in items],
         query_params=request.params,
         insight=insight,
         source="tmdb:discover",
         page=request.page,
-        has_more=len(movies) == 20,
+        has_more=len(items) == 20,
     )
 
 
@@ -161,22 +170,33 @@ async def search(request: SearchRequest) -> SearchResponse:
 
     try:
         has_filters = any(k not in ("keyword", "sort_by") for k in params)
-        if has_filters:
-            movies = await asyncio.to_thread(tmdb_search.discover_movies, params, request.page)
-            if not movies:
+        if request.media_type == "tv":
+            if has_filters:
+                movies = await asyncio.to_thread(tmdb_search.discover_tv, params, request.page)
+                if not movies:
+                    keyword = params.get("keyword") or request.question
+                    movies = await asyncio.to_thread(tmdb_search.search_tv, keyword, request.page)
+            else:
+                keyword = params.get("keyword") or request.question
+                movies = await asyncio.to_thread(tmdb_search.search_tv, keyword, request.page)
+        else:
+            if has_filters:
+                movies = await asyncio.to_thread(tmdb_search.discover_movies, params, request.page)
+                if not movies:
+                    keyword = params.get("keyword") or request.question
+                    movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
+            else:
                 keyword = params.get("keyword") or request.question
                 movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
-        else:
-            keyword = params.get("keyword") or request.question
-            movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
     except Exception as exc:
         log.error("TMDB search failed: %s", exc)
         raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
 
+    label = "series" if request.media_type == "tv" else "movies"
     insight = (
-        f"Found {len(movies)} movies matching your query."
+        f"Found {len(movies)} {label} matching your query."
         if movies
-        else "No movies found. Try rephrasing your question."
+        else f"No {label} found. Try rephrasing your question."
     )
 
     return SearchResponse(
@@ -197,12 +217,13 @@ async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchRespo
         log.warning("Keyword extraction failed: %s", exc)
         keyword = " ".join(request.query.split()[:5])
 
+    search_fn = tmdb_search.search_tv if request.media_type == "tv" else tmdb_search.search_movies
     try:
-        movies = await asyncio.to_thread(tmdb_search.search_movies, keyword, request.page)
+        movies = await asyncio.to_thread(search_fn, keyword, request.page)
         if not movies and " " in keyword:
             for word in keyword.split():
                 if len(word) > 3:
-                    movies = await asyncio.to_thread(tmdb_search.search_movies, word, request.page)
+                    movies = await asyncio.to_thread(search_fn, word, request.page)
                     if movies:
                         break
     except Exception as exc:
@@ -228,4 +249,16 @@ async def movie_detail(movie_id: int) -> MovieDetailResponse:
         raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
     if data is None:
         raise HTTPException(status_code=404, detail="Movie not found")
+    return MovieDetailResponse(**data)
+
+
+@app.get("/api/tv/{tv_id}", response_model=MovieDetailResponse)
+async def tv_detail(tv_id: int) -> MovieDetailResponse:
+    try:
+        data = await asyncio.to_thread(tmdb_search.get_tv_detail, tv_id)
+    except Exception as exc:
+        log.error("TMDB TV detail failed for id=%s: %s", tv_id, exc)
+        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
+    if data is None:
+        raise HTTPException(status_code=404, detail="TV series not found")
     return MovieDetailResponse(**data)
