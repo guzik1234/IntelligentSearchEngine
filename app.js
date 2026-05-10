@@ -221,9 +221,14 @@ const POSTER_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2
 
 function appendMovieCards(movies, container) {
   if (!container || !movies || !movies.length) return;
+  const existingIds = new Set(
+    [...container.querySelectorAll("[data-movie-id]")].map(el => el.dataset.movieId)
+  );
+  const unique = movies.filter(r => !existingIds.has(String(r.movieId)));
+  if (!unique.length) return;
   const frag = document.createDocumentFragment();
   const tmp = document.createElement("div");
-  tmp.innerHTML = movies
+  tmp.innerHTML = unique
     .map(
       (r) => `<div class="movie-card" data-movie-id="${r.movieId}" data-media-type="${r.media_type || 'movie'}">
         <img

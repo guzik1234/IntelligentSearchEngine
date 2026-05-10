@@ -114,6 +114,186 @@ def _format_movie(m: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def get_movies_by_actor(name: str, page: int = 1) -> list[dict[str, Any]]:
+    """Find movies featuring a specific actor/director."""
+    data = _tmdb_get("search/person", {"query": name, "page": 1, "language": "en-US"})
+    if not data or not data.get("results"):
+        return []
+    person = data["results"][0]
+    person_id = person["id"]
+    credits = _tmdb_get(f"person/{person_id}/movie_credits", {"language": "en-US"})
+    if not credits:
+        return []
+    cast = credits.get("cast", [])
+    crew = credits.get("crew", [])
+    directed = [m for m in crew if m.get("job") == "Director"]
+    # exclude documentary appearances where person plays themselves
+    filtered_cast = [
+        m for m in cast
+        if str(m.get("character", "")).lower() not in ("himself", "herself", "themselves", "")
+        or m.get("vote_count", 0) >= 500
+    ]
+    movies = filtered_cast + directed
+    # require minimum vote threshold to exclude obscure docs
+    movies = [m for m in movies if m.get("vote_count", 0) >= 100]
+    seen: set[int] = set()
+    unique = []
+    for m in sorted(movies, key=lambda x: x.get("vote_count", 0), reverse=True):
+        if m["id"] not in seen:
+            seen.add(m["id"])
+            unique.append(m)
+    start = (page - 1) * 20
+    return [_format_movie(m) for m in unique[start: start + 20]]
+
+
+def get_tv_by_actor(name: str, page: int = 1) -> list[dict[str, Any]]:
+    """Find TV shows featuring a specific actor/director."""
+    data = _tmdb_get("search/person", {"query": name, "page": 1, "language": "en-US"})
+    if not data or not data.get("results"):
+        return []
+    person_id = data["results"][0]["id"]
+    credits = _tmdb_get(f"person/{person_id}/tv_credits", {"language": "en-US"})
+    if not credits:
+        return []
+    cast = credits.get("cast", [])
+    crew = credits.get("crew", [])
+    directed = [m for m in crew if m.get("job") == "Director"]
+    filtered_cast = [
+        m for m in cast
+        if str(m.get("character", "")).lower() not in ("himself", "herself", "themselves", "")
+        or m.get("vote_count", 0) >= 200
+    ]
+    shows = filtered_cast + directed
+    shows = [m for m in shows if m.get("vote_count", 0) >= 50]
+    seen: set[int] = set()
+    unique = []
+    for m in sorted(shows, key=lambda x: x.get("vote_count", 0), reverse=True):
+        if m["id"] not in seen:
+            seen.add(m["id"])
+            unique.append(m)
+    start = (page - 1) * 20
+    return [_format_tv(m) for m in unique[start: start + 20]]
+
+
+def get_movies_by_theme(theme: str, page: int = 1, limit: int = 20) -> list[dict[str, Any]]:
+    """Find movies matching a specific theme or motif using TMDB keyword search."""
+    kw_data = _tmdb_get("search/keyword", {"query": theme, "page": 1})
+    keyword_ids: list[int] = []
+    if kw_data:
+        keyword_ids = [k["id"] for k in kw_data.get("results", [])[:5]]
+    extra_pages = range(page, page + (2 if limit > 20 else 1))
+    if keyword_ids:
+        ids_str = "|".join(str(i) for i in keyword_ids)
+        results: list[dict[str, Any]] = []
+        for p in extra_pages:
+            data = _tmdb_get("discover/movie", {
+                "with_keywords": ids_str,
+                "language": "en-US",
+                "include_adult": "false",
+                "sort_by": "popularity.desc",
+                "vote_count.gte": "50",
+                "page": p,
+            })
+            results.extend(data.get("results", []) if data else [])
+        if results:
+            return [_format_movie(m) for m in results[:limit]]
+    # fallback: discover by text search sorted by popularity
+    results = []
+    for p in extra_pages:
+        data = _tmdb_get("search/movie", {
+            "query": theme,
+            "page": p,
+            "include_adult": "false",
+            "language": "en-US",
+        })
+        results.extend(data.get("results", []) if data else [])
+    results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
+    return [_format_movie(m) for m in results[:limit]]
+
+
+def get_tv_by_theme(theme: str, page: int = 1, limit: int = 20) -> list[dict[str, Any]]:
+    """Find TV shows matching a specific theme or motif."""
+    kw_data = _tmdb_get("search/keyword", {"query": theme, "page": 1})
+    keyword_ids: list[int] = []
+    if kw_data:
+        keyword_ids = [k["id"] for k in kw_data.get("results", [])[:5]]
+    extra_pages = range(page, page + (2 if limit > 20 else 1))
+    if keyword_ids:
+        ids_str = "|".join(str(i) for i in keyword_ids)
+        results: list[dict[str, Any]] = []
+        for p in extra_pages:
+            data = _tmdb_get("discover/tv", {
+                "with_keywords": ids_str,
+                "language": "en-US",
+                "include_adult": "false",
+                "sort_by": "popularity.desc",
+                "vote_count.gte": "30",
+                "page": p,
+            })
+            results.extend(data.get("results", []) if data else [])
+        if results:
+            return [_format_tv(m) for m in results[:limit]]
+    results = []
+    for p in extra_pages:
+        data = _tmdb_get("search/tv", {
+            "query": theme,
+            "page": p,
+            "include_adult": "false",
+            "language": "en-US",
+        })
+        results.extend(data.get("results", []) if data else [])
+    results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
+    return [_format_tv(m) for m in results[:limit]]
+
+
+def fetch_movies_by_titles(titles: list[str]) -> list[dict[str, Any]]:
+    """Search TMDB for each title in the list and return the best match per title."""
+    results = []
+    seen: set[int] = set()
+    for title in titles:
+        data = _tmdb_get("search/movie", {
+            "query": title,
+            "page": 1,
+            "include_adult": "false",
+            "language": "en-US",
+        })
+        if not data or not data.get("results"):
+            continue
+        movie = data["results"][0]
+        if movie["id"] not in seen:
+            seen.add(movie["id"])
+            results.append(_format_movie(movie))
+    return results
+
+
+def get_similar_movies(title: str, page: int = 1) -> list[dict[str, Any]]:
+    """Find movies similar to a given title using TMDB recommendations."""
+    data = _tmdb_get("search/movie", {"query": title, "page": 1, "include_adult": "false", "language": "en-US"})
+    if not data or not data.get("results"):
+        return []
+    movie_id = data["results"][0]["id"]
+    rec = _tmdb_get(f"movie/{movie_id}/recommendations", {"language": "en-US", "page": page})
+    results = rec.get("results", []) if rec else []
+    if not results:
+        sim = _tmdb_get(f"movie/{movie_id}/similar", {"language": "en-US", "page": page})
+        results = sim.get("results", []) if sim else []
+    return [_format_movie(m) for m in results[:20]]
+
+
+def get_similar_tv(title: str, page: int = 1) -> list[dict[str, Any]]:
+    """Find TV shows similar to a given title using TMDB recommendations."""
+    data = _tmdb_get("search/tv", {"query": title, "page": 1, "include_adult": "false", "language": "en-US"})
+    if not data or not data.get("results"):
+        return []
+    show_id = data["results"][0]["id"]
+    rec = _tmdb_get(f"tv/{show_id}/recommendations", {"language": "en-US", "page": page})
+    results = rec.get("results", []) if rec else []
+    if not results:
+        sim = _tmdb_get(f"tv/{show_id}/similar", {"language": "en-US", "page": page})
+        results = sim.get("results", []) if sim else []
+    return [_format_tv(m) for m in results[:20]]
+
+
 def search_movies(query: str, page: int = 1) -> list[dict[str, Any]]:
     """Full-text search via TMDB /search/movie."""
     data = _tmdb_get("search/movie", {

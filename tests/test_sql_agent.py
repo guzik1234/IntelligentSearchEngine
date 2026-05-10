@@ -85,3 +85,72 @@ def test_extract_search_keyword_falls_back_without_groq() -> None:
 
     # fallback: first 5 words
     assert keyword == "toys that come to life"
+
+
+def test_suggest_movies_for_plot_falls_back_without_groq() -> None:
+    agent = SQLAgent()
+    agent.groq_api_key = ""  # disable Groq
+
+    titles = asyncio.run(agent.suggest_movies_for_plot("a man wakes up in a different body"))
+
+    assert titles == []
+
+
+def test_suggest_movies_for_plot_parses_groq_response(monkeypatch) -> None:
+    agent = SQLAgent()
+
+    def fake_suggest(_: str) -> list[str]:
+        return ["Big", "Freaky Friday", "Vice Versa"]
+
+    monkeypatch.setattr(agent, "_suggest_titles_with_groq", fake_suggest)
+
+    titles = asyncio.run(agent.suggest_movies_for_plot("a man wakes up in a different body"))
+    assert titles == ["Big", "Freaky Friday", "Vice Versa"]
+
+
+def test_suggest_movies_for_plot_handles_groq_error(monkeypatch) -> None:
+    agent = SQLAgent()
+
+    def fail(_: str) -> list[str]:
+        raise RuntimeError("groq unavailable")
+
+    monkeypatch.setattr(agent, "_suggest_titles_with_groq", fail)
+
+    titles = asyncio.run(agent.suggest_movies_for_plot("a man wakes up in a different body"))
+    assert titles == []
+
+
+def test_extract_tmdb_params_detects_actor(monkeypatch) -> None:
+    agent = SQLAgent()
+
+    def fake_extract(_: str) -> dict:
+        return {"actor": "Tom Hanks"}
+
+    monkeypatch.setattr(agent, "_extract_tmdb_params_with_groq", fake_extract)
+
+    params, source = asyncio.run(agent.generate_tmdb_params("movies with Tom Hanks"))
+    assert params.get("actor") == "Tom Hanks"
+
+
+def test_extract_tmdb_params_detects_similar_to(monkeypatch) -> None:
+    agent = SQLAgent()
+
+    def fake_extract(_: str) -> dict:
+        return {"similar_to": "Forrest Gump"}
+
+    monkeypatch.setattr(agent, "_extract_tmdb_params_with_groq", fake_extract)
+
+    params, _ = asyncio.run(agent.generate_tmdb_params("films similar to Forrest Gump"))
+    assert params.get("similar_to") == "Forrest Gump"
+
+
+def test_extract_tmdb_params_detects_theme(monkeypatch) -> None:
+    agent = SQLAgent()
+
+    def fake_extract(_: str) -> dict:
+        return {"theme": "time travel"}
+
+    monkeypatch.setattr(agent, "_extract_tmdb_params_with_groq", fake_extract)
+
+    params, _ = asyncio.run(agent.generate_tmdb_params("movies about time travel"))
+    assert params.get("theme") == "time travel"

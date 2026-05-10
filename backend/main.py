@@ -170,7 +170,71 @@ async def search(request: SearchRequest) -> SearchResponse:
 
     try:
         has_filters = any(k not in ("keyword", "sort_by") for k in params)
-        if request.media_type == "tv":
+        if "similar_to" in params:
+            similar_title = params["similar_to"]
+            if request.media_type == "tv":
+                movies = await asyncio.to_thread(tmdb_search.get_similar_tv, similar_title, request.page)
+            else:
+                movies = await asyncio.to_thread(tmdb_search.get_similar_movies, similar_title, request.page)
+        elif "actor" in params:
+            actor_name = params["actor"]
+            if request.media_type == "tv":
+                movies = await asyncio.to_thread(tmdb_search.get_tv_by_actor, actor_name, request.page)
+            else:
+                movies = await asyncio.to_thread(tmdb_search.get_movies_by_actor, actor_name, request.page)
+        elif "theme" in params:
+            theme = params["theme"]
+            # Run TMDB keyword fetch AND Groq title suggestions in parallel
+            if request.media_type == "tv":
+                tmdb_task = asyncio.create_task(
+                    asyncio.to_thread(tmdb_search.get_tv_by_theme, theme, request.page, 40)
+                )
+            else:
+                tmdb_task = asyncio.create_task(
+                    asyncio.to_thread(tmdb_search.get_movies_by_theme, theme, request.page, 40)
+                )
+            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(request.question))
+            tmdb_candidates = await tmdb_task
+            titles = await titles_task
+            title_candidates = (
+                await asyncio.to_thread(tmdb_search.fetch_movies_by_titles, titles) if titles else []
+            )
+            # Merge deduplicated (title suggestions first — higher quality)
+            seen: set[int] = set()
+            candidates = []
+            for m in title_candidates + tmdb_candidates:
+                if m["movieId"] not in seen:
+                    seen.add(m["movieId"])
+                    candidates.append(m)
+            movies = await sql_agent.rerank_with_groq(request.question, candidates)
+            movies = movies[:20]
+        elif "plot_description" in params:
+            plot = params["plot_description"]
+            # Run Groq title suggestions and keyword extraction in parallel
+            keyword_task = asyncio.create_task(sql_agent.extract_search_keyword(plot))
+            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(plot))
+            keyword = await keyword_task
+            titles = await titles_task
+            # Fetch from TMDB by keyword
+            if request.media_type == "tv":
+                tmdb_candidates = await asyncio.to_thread(tmdb_search.get_tv_by_theme, keyword, request.page, 40)
+            else:
+                tmdb_candidates = await asyncio.to_thread(tmdb_search.get_movies_by_theme, keyword, request.page, 40)
+            if not tmdb_candidates:
+                search_fn = tmdb_search.search_tv if request.media_type == "tv" else tmdb_search.search_movies
+                tmdb_candidates = await asyncio.to_thread(search_fn, keyword, request.page)
+            # Fetch from TMDB by Groq-suggested titles
+            title_candidates = await asyncio.to_thread(tmdb_search.fetch_movies_by_titles, titles) if titles else []
+            # Merge, deduplicate (title suggestions first — higher quality)
+            seen: set[int] = set()
+            candidates = []
+            for m in title_candidates + tmdb_candidates:
+                if m["movieId"] not in seen:
+                    seen.add(m["movieId"])
+                    candidates.append(m)
+            movies = await sql_agent.rerank_with_groq(request.question, candidates)
+            movies = movies[:20]
+        elif request.media_type == "tv":
             if has_filters:
                 movies = await asyncio.to_thread(tmdb_search.discover_tv, params, request.page)
                 if not movies:
@@ -211,32 +275,16 @@ async def search(request: SearchRequest) -> SearchResponse:
 
 @app.post("/api/semantic-search", response_model=SemanticSearchResponse)
 async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
-    try:
-        keyword = await sql_agent.extract_search_keyword(request.query)
-    except Exception as exc:
-        log.warning("Keyword extraction failed: %s", exc)
-        keyword = " ".join(request.query.split()[:5])
-
-    search_fn = tmdb_search.search_tv if request.media_type == "tv" else tmdb_search.search_movies
-    try:
-        movies = await asyncio.to_thread(search_fn, keyword, request.page)
-        if not movies and " " in keyword:
-            for word in keyword.split():
-                if len(word) > 3:
-                    movies = await asyncio.to_thread(search_fn, word, request.page)
-                    if movies:
-                        break
-    except Exception as exc:
-        log.error("TMDB semantic search failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Movie database unavailable. Please try again later.")
-
-    results = movies[: request.top_k]
+    # Delegate to the same smart routing as /api/search
+    search_req = SearchRequest(question=request.query, page=request.page, media_type=request.media_type)
+    search_resp = await search(search_req)
+    results = search_resp.movies[: request.top_k]
     return SemanticSearchResponse(
-        results=[MovieCard(**m) for m in results],
+        results=results,
         query=request.query,
         total=len(results),
         page=request.page,
-        has_more=len(movies) >= request.top_k,
+        has_more=len(search_resp.movies) >= request.top_k,
     )
 
 

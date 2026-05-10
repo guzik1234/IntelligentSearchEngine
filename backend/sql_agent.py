@@ -246,8 +246,18 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                 {
                     "role": "system",
                     "content": (
-                        "Extract movie search parameters from a natural language question. "
+                        "Extract movie/TV search parameters from a natural language question. "
                         "Return ONLY a valid JSON object with these optional fields:\n"
+                        '- "similar_to": string — title when user asks for similar/related/like a specific title '
+                        '(e.g. "films similar to Forrest Gump" → {"similar_to": "Forrest Gump"}).\n'
+                        '- "actor": string — full name of actor, actress or director when user asks for their movies '
+                        '(e.g. "movies with Tom Hanks", "films starring Scarlett Johansson", "directed by Nolan" → {"actor": "Tom Hanks"}).\n'
+                        '- "theme": string — specific theme, motif or plot element when user describes a concept '
+                        '(e.g. "movies about time travel", "films with heist", "coming of age stories", '
+                        '"movies about AI", "survival in space" → {"theme": "time travel"}).\n'
+                        '- "plot_description": string — free-form plot summary when user describes a specific plot '
+                        '(e.g. "a movie where a man wakes up in a different body" → {"plot_description": "man wakes up different body"}). '
+                        "Use this for vague descriptions that don't fit theme or keyword.\n"
                         '- "genre": one of: action, adventure, animation, comedy, crime, '
                         "documentary, drama, family, fantasy, history, horror, music, mystery, "
                         "romance, science fiction, thriller, war, western\n"
@@ -256,7 +266,8 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                         '- "year_lte": integer (released up to this year)\n'
                         '- "min_rating": float 1-10\n'
                         '- "sort_by": one of: popular, rating, newest, oldest, revenue\n'
-                        '- "keyword": string (movie title or keyword for text search)\n'
+                        '- "keyword": string — only for direct title searches (NOT for actor/similar/theme/plot requests)\n'
+                        "Priority: similar_to > actor > theme > plot_description > keyword.\n"
                         "Return ONLY JSON, no explanation."
                     ),
                 },
@@ -273,6 +284,107 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
             except Exception:
                 pass
         return {}
+
+    async def suggest_movies_for_plot(self, description: str) -> list[str]:
+        """Ask Groq to suggest specific movie titles matching a plot description."""
+        if self.groq_api_key:
+            try:
+                titles = await asyncio.to_thread(self._suggest_titles_with_groq, description)
+                if titles:
+                    return titles
+            except Exception:
+                pass
+        return []
+
+    def _suggest_titles_with_groq(self, description: str) -> list[str]:
+        from groq import Groq  # type: ignore[import-untyped]
+
+        client = Groq(api_key=self.groq_api_key)
+        response = client.chat.completions.create(
+            model=self.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "The user describes a movie plot or scenario. "
+                        "Your job: return a JSON array of exactly 10 real movie titles "
+                        "that best match this description. Include both classic and modern films. "
+                        "Order by how well they match (best first). "
+                        "Return ONLY a valid JSON array of strings, e.g.: "
+                        '["Big", "Freaky Friday", "Vice Versa"]. '
+                        "No explanations, no markdown."
+                    ),
+                },
+                {"role": "user", "content": description},
+            ],
+            temperature=0.3,
+            max_tokens=300,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            try:
+                titles = json.loads(match.group())
+                return [t for t in titles if isinstance(t, str)][:10]
+            except Exception:
+                pass
+        return []
+
+    async def rerank_with_groq(self, question: str, candidates: list[dict]) -> list[dict]:
+        """Re-rank TMDB candidates using Groq based on semantic relevance to the query."""
+        if not self.groq_api_key or len(candidates) < 3:
+            return candidates
+        try:
+            return await asyncio.to_thread(self._rerank_with_groq, question, candidates)
+        except Exception:
+            return candidates
+
+    def _rerank_with_groq(self, question: str, candidates: list[dict]) -> list[dict]:
+        from groq import Groq  # type: ignore[import-untyped]
+
+        items = []
+        for m in candidates:
+            title = m.get("title", "")
+            desc = (m.get("description") or "")[:120]
+            items.append(f"[ID:{m['movieId']}] {title} — {desc}")
+        movies_list = "\n".join(items)
+
+        client = Groq(api_key=self.groq_api_key)
+        response = client.chat.completions.create(
+            model=self.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a movie recommendation expert. "
+                        "Given a user query and a list of movies (each with an ID), "
+                        "return a JSON array of the movie IDs ordered from most to least relevant to the query. "
+                        "Only include IDs of movies that genuinely match the query. "
+                        "Return up to 20 IDs. "
+                        "Return ONLY a valid JSON array of integers, e.g.: [123, 456, 789]. "
+                        "No explanations, no markdown."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Query: {question}\n\nMovies:\n{movies_list}",
+                },
+            ],
+            temperature=0,
+            max_tokens=400,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            try:
+                ids = json.loads(match.group())
+                id_to_movie = {m["movieId"]: m for m in candidates}
+                ranked = [id_to_movie[mid] for mid in ids if mid in id_to_movie]
+                ranked_ids = {m["movieId"] for m in ranked}
+                return ranked + [m for m in candidates if m["movieId"] not in ranked_ids]
+            except Exception:
+                pass
+        return candidates
 
     async def generate_sql(self, question: str) -> tuple[str, str]:
         # Prefer Groq when API key is configured
