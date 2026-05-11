@@ -252,9 +252,15 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                         '(e.g. "films similar to Forrest Gump" → {"similar_to": "Forrest Gump"}).\n'
                         '- "actor": string — full name of actor, actress or director when user asks for their movies '
                         '(e.g. "movies with Tom Hanks", "films starring Scarlett Johansson", "directed by Nolan" → {"actor": "Tom Hanks"}).\n'
-                        '- "theme": string — specific theme, motif or plot element when user describes a concept '
-                        '(e.g. "movies about time travel", "films with heist", "coming of age stories", '
-                        '"movies about AI", "survival in space" → {"theme": "time travel"}).\n'
+                        '- "theme": string — core concept noun(s) when user describes a theme, relationship, or motif. '
+                        'Use the SIMPLEST possible keyword (strip adjectives) so TMDB keyword search returns broad results. '
+                        'Examples: "unusual friendship" → {"theme": "friendship"}, '
+                        '"tragic love story" → {"theme": "love"}, '
+                        '"passion for cooking" → {"theme": "cooking"}, '
+                        '"student and master" → {"theme": "mentorship"}, '
+                        '"passion to dance" → {"theme": "dance"}, '
+                        '"movies about time travel" → {"theme": "time travel"}, '
+                        '"survival in space" → {"theme": "space survival"}.\n'
                         '- "plot_description": string — free-form plot summary when user describes a specific plot '
                         '(e.g. "a movie where a man wakes up in a different body" → {"plot_description": "man wakes up different body"}). '
                         "Use this for vague descriptions that don't fit theme or keyword.\n"
@@ -306,26 +312,36 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                 {
                     "role": "system",
                     "content": (
-                        "The user describes a movie plot or scenario. "
-                        "Your job: return a JSON array of exactly 10 real movie titles "
-                        "that best match this description. Include both classic and modern films. "
-                        "Order by how well they match (best first). "
-                        "Return ONLY a valid JSON array of strings, e.g.: "
-                        '["Big", "Freaky Friday", "Vice Versa"]. '
-                        "No explanations, no markdown."
+                        "You are a movie recommendation engine. "
+                        "The user provides a theme, relationship, mood, or scenario. "
+                        "Return a JSON array of exactly 15 real movie titles that explore this concept "
+                        "from multiple angles.\n"
+                        "Rules:\n"
+                        "- Before choosing titles, mentally identify 3-4 distinct sub-interpretations "
+                        "or expressions of the concept (e.g. different contexts, tones, or character dynamics "
+                        "that all fall under the same theme). Then pick films that together cover those angles.\n"
+                        "- Represent multiple decades (not only recent films), multiple genres, "
+                        "multiple tonal registers (light/dark/dramatic/comedic), and include non-Hollywood films.\n"
+                        "- Include films where the concept is the main focus AND films where it is "
+                        "a meaningful secondary element.\n"
+                        "- Do not anchor on the single most famous film for this topic; that film may appear "
+                        "in the list but should not crowd out other strong matches.\n"
+                        "- No duplicates. No TV series.\n"
+                        "- Order from most to least relevant.\n"
+                        "Return ONLY a valid JSON array of strings. No explanations, no markdown."
                     ),
                 },
                 {"role": "user", "content": description},
             ],
-            temperature=0.3,
-            max_tokens=300,
+            temperature=0.5,
+            max_tokens=600,
         )
         text = (response.choices[0].message.content or "").strip()
         match = re.search(r"\[.*\]", text, re.DOTALL)
         if match:
             try:
                 titles = json.loads(match.group())
-                return [t for t in titles if isinstance(t, str)][:10]
+                return [t for t in titles if isinstance(t, str)][:15]
             except Exception:
                 pass
         return []
@@ -359,7 +375,8 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                         "You are a movie recommendation expert. "
                         "Given a user query and a list of movies (each with an ID), "
                         "return a JSON array of the movie IDs ordered from most to least relevant to the query. "
-                        "Only include IDs of movies that genuinely match the query. "
+                        "Be INCLUSIVE — include all movies that have any meaningful connection to the theme, "
+                        "relationship, or scenario described, even if it is not their primary plot. "
                         "Return up to 20 IDs. "
                         "Return ONLY a valid JSON array of integers, e.g.: [123, 456, 789]. "
                         "No explanations, no markdown."
