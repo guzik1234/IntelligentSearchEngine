@@ -291,18 +291,18 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                 pass
         return {}
 
-    async def suggest_movies_for_plot(self, description: str) -> list[str]:
-        """Ask Groq to suggest specific movie titles matching a plot description."""
+    async def suggest_movies_for_plot(self, description: str, media_type: str = "movie") -> list[str]:
+        """Ask Groq to suggest specific movie/TV titles matching a plot description."""
         if self.groq_api_key:
             try:
-                titles = await asyncio.to_thread(self._suggest_titles_with_groq, description)
+                titles = await asyncio.to_thread(self._suggest_titles_with_groq, description, media_type)
                 if titles:
                     return titles
             except Exception:
                 pass
         return []
 
-    def _suggest_titles_with_groq(self, description: str) -> list[str]:
+    def _suggest_titles_with_groq(self, description: str, media_type: str = "movie") -> list[str]:
         from groq import Groq  # type: ignore[import-untyped]
 
         client = Groq(api_key=self.groq_api_key)
@@ -312,21 +312,21 @@ Given the database schema, here is the SQL query that answers [QUESTION]{questio
                 {
                     "role": "system",
                     "content": (
-                        "You are a movie recommendation engine. "
+                        f"You are a {'TV series' if media_type == 'tv' else 'movie'} recommendation engine. "
                         "The user provides a theme, relationship, mood, or scenario. "
-                        "Return a JSON array of exactly 15 real movie titles that explore this concept "
-                        "from multiple angles.\n"
+                        f"Return a JSON array of exactly 15 real {'TV series titles' if media_type == 'tv' else 'movie titles'} "
+                        "that explore this concept from multiple angles.\n"
                         "Rules:\n"
                         "- Before choosing titles, mentally identify 3-4 distinct sub-interpretations "
                         "or expressions of the concept (e.g. different contexts, tones, or character dynamics "
-                        "that all fall under the same theme). Then pick films that together cover those angles.\n"
-                        "- Represent multiple decades (not only recent films), multiple genres, "
-                        "multiple tonal registers (light/dark/dramatic/comedic), and include non-Hollywood films.\n"
-                        "- Include films where the concept is the main focus AND films where it is "
+                        "that all fall under the same theme). Then pick titles that together cover those angles.\n"
+                        "- Represent multiple decades (not only recent titles), multiple genres, "
+                        "multiple tonal registers (light/dark/dramatic/comedic), and include non-English titles.\n"
+                        "- Include titles where the concept is the main focus AND titles where it is "
                         "a meaningful secondary element.\n"
-                        "- Do not anchor on the single most famous film for this topic; that film may appear "
+                        "- Do not anchor on the single most famous title for this topic; that title may appear "
                         "in the list but should not crowd out other strong matches.\n"
-                        "- No duplicates. No TV series.\n"
+                        f"- No duplicates. {'No movies — TV series only.' if media_type == 'tv' else 'No TV series — movies only.'}\n"
                         "- Order from most to least relevant.\n"
                         "Return ONLY a valid JSON array of strings. No explanations, no markdown."
                     ),

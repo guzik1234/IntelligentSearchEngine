@@ -266,6 +266,26 @@ def fetch_movies_by_titles(titles: list[str]) -> list[dict[str, Any]]:
     return results
 
 
+def fetch_tv_by_titles(titles: list[str]) -> list[dict[str, Any]]:
+    """Search TMDB for each TV show title in the list and return the best match per title."""
+    results = []
+    seen: set[int] = set()
+    for title in titles:
+        data = _tmdb_get("search/tv", {
+            "query": title,
+            "page": 1,
+            "include_adult": "false",
+            "language": "en-US",
+        })
+        if not data or not data.get("results"):
+            continue
+        show = data["results"][0]
+        if show["id"] not in seen:
+            seen.add(show["id"])
+            results.append(_format_tv(show))
+    return results
+
+
 def get_similar_movies(title: str, page: int = 1) -> list[dict[str, Any]]:
     """Find movies similar to a given title using TMDB recommendations."""
     data = _tmdb_get("search/movie", {"query": title, "page": 1, "include_adult": "false", "language": "en-US"})

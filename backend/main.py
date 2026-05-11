@@ -193,11 +193,12 @@ async def search(request: SearchRequest) -> SearchResponse:
                 tmdb_task = asyncio.create_task(
                     asyncio.to_thread(tmdb_search.get_movies_by_theme, theme, request.page, 40)
                 )
-            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(request.question))
+            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(request.question, request.media_type))
             tmdb_candidates = await tmdb_task
             titles = await titles_task
+            fetch_by_titles = tmdb_search.fetch_tv_by_titles if request.media_type == "tv" else tmdb_search.fetch_movies_by_titles
             title_candidates = (
-                await asyncio.to_thread(tmdb_search.fetch_movies_by_titles, titles) if titles else []
+                await asyncio.to_thread(fetch_by_titles, titles) if titles else []
             )
             # Merge deduplicated (title suggestions first — higher quality)
             seen: set[int] = set()
@@ -212,7 +213,7 @@ async def search(request: SearchRequest) -> SearchResponse:
             plot = params["plot_description"]
             # Run Groq title suggestions and keyword extraction in parallel
             keyword_task = asyncio.create_task(sql_agent.extract_search_keyword(plot))
-            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(plot))
+            titles_task = asyncio.create_task(sql_agent.suggest_movies_for_plot(plot, request.media_type))
             keyword = await keyword_task
             titles = await titles_task
             # Fetch from TMDB by keyword
@@ -224,7 +225,8 @@ async def search(request: SearchRequest) -> SearchResponse:
                 search_fn = tmdb_search.search_tv if request.media_type == "tv" else tmdb_search.search_movies
                 tmdb_candidates = await asyncio.to_thread(search_fn, keyword, request.page)
             # Fetch from TMDB by Groq-suggested titles
-            title_candidates = await asyncio.to_thread(tmdb_search.fetch_movies_by_titles, titles) if titles else []
+            fetch_by_titles = tmdb_search.fetch_tv_by_titles if request.media_type == "tv" else tmdb_search.fetch_movies_by_titles
+            title_candidates = await asyncio.to_thread(fetch_by_titles, titles) if titles else []
             # Merge, deduplicate (title suggestions first — higher quality)
             seen: set[int] = set()
             candidates = []
