@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/pip install *)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "PowerShell(docker --version)",
+      "PowerShell(docker compose version)",
+      "Bash(Get-Content \"C:/Users/mmare/AppData/Local/Temp/claude/c--Users-mmare-Desktop-IntelligentSearchEngine/ae2bba62-a291-45a3-9864-9c09efbbf525/tasks/bi88ppxq9.output\" -Raw)",
+      "Bash(.venv/Scripts/python scripts/build_index.py --limit 10000 --batch-size 256)",
+      "PowerShell(Stop-Process -Id 35812, 19452, 26044 -Force -ErrorAction SilentlyContinue)"
+    ]
+  }
+}

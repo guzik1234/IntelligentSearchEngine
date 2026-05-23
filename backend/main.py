@@ -1,5 +1,6 @@
 ﻿import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.sql_agent import SQLAgent
-from backend import tmdb_search
+from backend import tmdb_search, qdrant_search
 
 log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -90,7 +91,13 @@ class MovieDetailResponse(BaseModel):
 
 # --- App setup ---
 
-app = FastAPI(title="IntelligentSearchEngine API", version="0.2.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    asyncio.create_task(asyncio.to_thread(qdrant_search.preload_model))
+    yield
+
+
+app = FastAPI(title="IntelligentSearchEngine API", version="0.2.0", lifespan=lifespan)
 sql_agent = SQLAgent()
 
 app.add_middleware(
@@ -277,16 +284,54 @@ async def search(request: SearchRequest) -> SearchResponse:
 
 @app.post("/api/semantic-search", response_model=SemanticSearchResponse)
 async def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
-    # Delegate to the same smart routing as /api/search
     search_req = SearchRequest(question=request.query, page=request.page, media_type=request.media_type)
-    search_resp = await search(search_req)
-    results = search_resp.movies[: request.top_k]
+
+    if request.media_type == "tv":
+        # Qdrant index covers movies only — TV falls back to TMDB routing
+        search_resp = await search(search_req)
+        results = search_resp.movies[: request.top_k]
+        return SemanticSearchResponse(
+            results=results,
+            query=request.query,
+            total=len(results),
+            page=request.page,
+            has_more=len(search_resp.movies) >= request.top_k,
+        )
+
+    # Hybrid: Qdrant similarity search + TMDB/Groq routing — run in parallel
+    qdrant_task = asyncio.create_task(
+        asyncio.to_thread(qdrant_search.search, request.query, 40)
+    )
+    tmdb_task = asyncio.create_task(search(search_req))
+
+    qdrant_result, tmdb_result = await asyncio.gather(qdrant_task, tmdb_task, return_exceptions=True)
+
+    qdrant_movies: list[dict] = qdrant_result if isinstance(qdrant_result, list) else []
+    tmdb_movies: list[dict] = (
+        [m.model_dump() for m in tmdb_result.movies]
+        if isinstance(tmdb_result, SearchResponse)
+        else []
+    )
+
+    # Merge — Qdrant first (semantic score already sorted), then TMDB supplements
+    seen: set[int] = set()
+    candidates: list[dict] = []
+    for m in qdrant_movies + tmdb_movies:
+        mid = m.get("movieId")
+        if mid and mid not in seen:
+            seen.add(mid)
+            candidates.append(m)
+
+    if candidates:
+        candidates = await sql_agent.rerank_with_groq(request.query, candidates)
+
+    final = candidates[: request.top_k]
     return SemanticSearchResponse(
-        results=results,
+        results=[MovieCard(**m) for m in final],
         query=request.query,
-        total=len(results),
+        total=len(final),
         page=request.page,
-        has_more=len(search_resp.movies) >= request.top_k,
+        has_more=len(candidates) > request.top_k,
     )
 
 

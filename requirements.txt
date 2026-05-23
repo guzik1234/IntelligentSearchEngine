@@ -5,3 +5,9 @@ python-dotenv==1.1.1
 pytest==8.4.2
 requests==2.32.3
 groq>=0.11.0
+qdrant-client>=1.9.0
+sentence-transformers>=3.0.0
+numpy>=1.26.0
+# GPU note: sentence-transformers installs CPU torch by default.
+# For CUDA support run separately:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
