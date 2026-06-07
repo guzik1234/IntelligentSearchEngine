@@ -59,14 +59,14 @@ def search(query: str, top_k: int = 40) -> list[dict[str, Any]]:
     """
     try:
         vector = _get_model().encode(query, normalize_embeddings=True).tolist()
-        hits = _get_client().search(
+        result = _get_client().query_points(
             collection_name=COLLECTION,
-            query_vector=vector,
+            query=vector,
             limit=top_k,
             with_payload=True,
             score_threshold=SIMILARITY_THRESHOLD,
         )
-        return [{"score": h.score, **h.payload} for h in hits]
+        return [{**h.payload, "score": h.score} for h in result.points]
     except Exception as exc:
         log.warning("Qdrant search failed: %s", exc)
         return []
